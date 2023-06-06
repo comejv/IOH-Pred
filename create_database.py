@@ -1,5 +1,7 @@
-from os import listdir, makedirs
-from os.path import exists
+from os import listdir, makedirs, remove
+from os.path import exists, join, basename
+from concurrent.futures import ThreadPoolExecutor
+from tempfile import NamedTemporaryFile
 
 import pandas as pd
 import vitaldb as vdb
@@ -35,13 +37,37 @@ def download_cases(track_names: list, case_ids: list) -> None:
             break
 
 
-def folder_vital_to_csv(folder, interval):
-    makedirs("data/csv", exist_ok=True)
-    for file in listdir(folder):
-        vital = vdb.VitalFile(folder + file)
+def vital_to_csv(ipath, opath, interval):
+    try:
+        vital = vdb.VitalFile(ipath)
         track_names = vital.get_track_names()
-        vital.to_csv(f"data/csv/{file}", track_names, interval=interval)
-        verbose(file, "converted to csv")
+        with open(opath, "w") as tmp:
+            df = vital.to_pandas(track_names, interval)
+            df.to_csv(tmp)
+        verbose(ipath, "converted to csv")
+    except Exception as e:
+        print(f"Could not convert {ipath} to csv : {e}")
+        if exists(opath):
+            remove(opath)
+
+
+def folder_vital_to_csv(ifolder, ofolder, interval):
+    with ThreadPoolExecutor(max_workers=30) as executor:
+        for file in listdir(ifolder):
+            if not file.endswith("vital"):
+                continue
+
+            ipath = join(ifolder, file)
+            ofilename = basename(ipath)
+            ofilename = ofilename[: ofilename.index(".")]
+            opath = join(ofolder, ofilename)
+            opath += ".csv"
+
+            if exists(opath):
+                verbose("File", opath, "already converted, skipping")
+                continue
+
+            executor.submit(vital_to_csv, ipath, opath, interval)
 
 
 def quality_control(df: pd.DataFrame) -> bool:
@@ -111,7 +137,7 @@ def load_cases(
 
 
 VERBOSE = False
-INTERVAL = 1 / 500
+INTERVAL = None # for max res
 
 TRACKS = ["ART", "ART_MBP", "CI", "SVI", "SVRI", "SVV", "ART_SBP", "ART_DBP"]
 
@@ -125,4 +151,4 @@ if __name__ == "__main__":
 
     # print(sum([quality_control(cases[cid]) for cid in loaded_ids]), "/", len(loaded_ids), "pass")
 
-    folder_vital_to_csv("data/vital/", INTERVAL)
+    folder_vital_to_csv("data/vital/", "data/csv/", interval=INTERVAL)
