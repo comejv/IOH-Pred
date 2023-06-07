@@ -1,7 +1,7 @@
-from os import listdir, makedirs, remove
+from os import listdir, makedirs, remove, rename
 from os.path import exists, join, basename
-from concurrent.futures import ThreadPoolExecutor
-from tempfile import NamedTemporaryFile
+from sys import argv
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pandas as pd
 import vitaldb as vdb
@@ -16,34 +16,56 @@ def find_cases(track_names: list[str]) -> list[int]:
     return vdb.find_cases(track_names)
 
 
-def download_cases(track_names: list, case_ids: list) -> None:
-    """Download a list of cases from the VitalDB database
+def download_case(case_id: int, track_names: list[str], index: int = None) -> None:
+    """Download a single case from the database
+
+    Args:
+        case_id (int): case id
+        track_names (list[str]): list of track names
+        index (int, optional): Counter of the current case being downloaded. Defaults to None.
+    """
+    if exists(f"data/vital/{case_id}.vital"):
+        verbose(f"Case {case_id} already exists")
+        return
+    try:
+        case = vdb.VitalFile(case_id, track_names)
+        case.to_vital(opath=f"data/vital/{case_id}.vital")
+        if index:
+            verbose(f"Downloaded case {case_id} : {index+1}/{len(case_ids)}")
+        else:
+            verbose(f"Downloaded case {case_id}")
+    except KeyboardInterrupt:
+        print("Download interrupted")
+        return
+
+
+def download_cases(track_names: list[str], case_ids: list[int]) -> None:
+    """Download a list of cases from the VitalDB database ; multithreaded.
 
     Args:
         track_names (list): list of track names
         case_ids (list): list of case ids
     """
-    makedirs("data/cases", exist_ok=True)
-    for i, case_id in enumerate(case_ids):
-        if exists(f"data/cases/{case_id}.vital"):
-            verbose(f"Case {case_id} already exists")
-            continue
-        try:
-            verbose(f"Downloading case {case_id} : {i+1}/{len(case_ids)}")
-            case = vdb.VitalFile(case_id, track_names)
-            case.to_vital(opath=f"data/cases/{case_id}.vital")
-        except KeyboardInterrupt:
-            print("Download interrupted")
-            break
+    makedirs("data/vital", exist_ok=True)
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        for i, case_id in enumerate(case_ids):
+            executor.submit(download_case, case_id, track_names, i)
 
 
-def vital_to_csv(ipath, opath, interval):
+def vital_to_csv(ipath: str, opath: str, interval: float = None) -> None:
+    """Convert vital file to csv
+
+    Args:
+        ipath (str): path to the vital file to convert
+        opath (str): path where to save the csv
+        interval (float): interval resolution in seconds. Defaults to None (max res)
+    """
     try:
         vital = vdb.VitalFile(ipath)
         track_names = vital.get_track_names()
         with open(opath, "w") as tmp:
             df = vital.to_pandas(track_names, interval)
-            df.to_csv(tmp)
+            df.to_csv(tmp, index=False)
         verbose(ipath, "converted to csv")
     except Exception as e:
         print(f"Could not convert {ipath} to csv : {e}")
@@ -51,7 +73,15 @@ def vital_to_csv(ipath, opath, interval):
             remove(opath)
 
 
-def folder_vital_to_csv(ifolder, ofolder, interval):
+def folder_vital_to_csv(ifolder: str, ofolder: str, interval: float = None) -> None:
+    """Convert all vital files in a folder to csv ; multithreaded
+
+    Args:
+        ifolder (str): path to the folder containing the vital files
+        ofolder (str): path where to save the csv files
+        interval (float): interval resolution in seconds. Defaults to None (max res)
+    """
+    makedirs(ofolder, exist_ok=True)
     with ThreadPoolExecutor(max_workers=30) as executor:
         for file in listdir(ifolder):
             if not file.endswith("vital"):
@@ -70,21 +100,69 @@ def folder_vital_to_csv(ifolder, ofolder, interval):
             executor.submit(vital_to_csv, ipath, opath, interval)
 
 
-def quality_control(df: pd.DataFrame) -> bool:
+def quality_control(vital_path: str, ofolder: str) -> bool:
+    """Quality control of a vital file
+
+    Args:
+        vital (vdb.VitalFile): vital file to check
+
+    Returns:
+        bool: True if ok, False otherwise
+    """
+    vital = vdb.VitalFile(vital_path)
+    df = vital.to_pandas(vital.get_track_names(), None)
+
+    # Delete rows with only nan values
+    df.dropna(axis="index", how="all", inplace=True)
+
     # No more than 20% missing data for ART and ART_MPB
-    if df["ART"].isna().sum() > 0.3 * len(df):
-        verbose("More than 20% of missing values")
+    if df["ART"].isna().sum() > 0.2 * len(df):
+        verbose(f"More than 20% of missing values for ART ({basename(vital_path)})")
         return False
-    if df["ART_MBP"].isna().sum() > 0.3 * len(df):
-        verbose("More than 20% of missing values")
-        return False
+    # TODO : Check for ART_MBP, taking into account that it's only
+    # present every 1.7 seconds instead of every 1/500 seconds like ART
 
     # No more than 20% of values under 50mmHg for ART_MBP
     if (df["ART_MBP"] < 50).sum() > 0.2 * len(df):
         verbose("More than 20% of MAP under 50mmHg")
         return False
 
+    # Move file to ofolder
+    rename(src=vital_path, dst=join(ofolder, basename(vital_path)))
+
     return True
+
+
+def folder_quality_control(ifolder: str, ofolder: str, force: bool = False) -> None:
+    """Quality control of all vital files in a folder ; multithreaded
+
+    Args:
+        ifolder (str): path to the folder containing the vital files
+        ofolder (str): path where to save the csv files
+    """
+    makedirs(ofolder, exist_ok=True)
+    futures = []
+    valid_cases = 0
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        for file in listdir(ifolder):
+            if not file.endswith("vital"):
+                continue
+            ipath = join(ifolder, file)
+            ofilename = basename(ipath)
+            opath = join(ofolder, ofilename)
+
+            if exists(opath) and not force:
+                verbose("File", opath, "already controlled, skipping")
+                continue
+
+            futures.append(executor.submit(quality_control, ipath, opath))
+
+        for future in as_completed(futures):
+            if future.result():
+                valid_cases += 1
+
+    verbose(f"Valid cases : {valid_cases}/{len(listdir(ifolder))}")
 
 
 def load_cases(
@@ -137,7 +215,7 @@ def load_cases(
 
 
 VERBOSE = False
-INTERVAL = None # for max res
+INTERVAL = None  # for max res
 
 TRACKS = ["ART", "ART_MBP", "CI", "SVI", "SVRI", "SVV", "ART_SBP", "ART_DBP"]
 
@@ -147,8 +225,7 @@ if __name__ == "__main__":
         case_ids = find_cases(TRACKS)
         download_cases(TRACKS, case_ids)
 
-    # cases, loaded_ids = load_cases(track_names=TRACKS, dir_path="data/cases", num_cases=15)
-
-    # print(sum([quality_control(cases[cid]) for cid in loaded_ids]), "/", len(loaded_ids), "pass")
-
-    folder_vital_to_csv("data/vital/", "data/csv/", interval=INTERVAL)
+    if "-csv" in argv:
+        folder_vital_to_csv("data/vital/", "data/csv/", interval=INTERVAL)
+    if "-quality" in argv:
+        folder_quality_control("data/vital/", "data/quality/", force=True)
