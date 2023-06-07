@@ -82,22 +82,29 @@ def folder_vital_to_csv(ifolder: str, ofolder: str, interval: float = None) -> N
         interval (float): interval resolution in seconds. Defaults to None (max res)
     """
     makedirs(ofolder, exist_ok=True)
-    with ThreadPoolExecutor(max_workers=30) as executor:
-        for file in listdir(ifolder):
-            if not file.endswith("vital"):
-                continue
 
-            ipath = join(ifolder, file)
-            ofilename = basename(ipath)
-            ofilename = ofilename[: ofilename.index(".")]
-            opath = join(ofolder, ofilename)
-            opath += ".csv"
+    ipaths = []
+    opaths = []
 
-            if exists(opath):
-                verbose("File", opath, "already converted, skipping")
-                continue
+    for file in listdir(ifolder):
+        if not file.endswith("vital"):
+            continue
 
-            executor.submit(vital_to_csv, ipath, opath, interval)
+        ipath = join(ifolder, file)
+        ofilename = basename(ipath)
+        ofilename = ofilename[: ofilename.index(".")]
+        opath = join(ofolder, ofilename)
+        opath += ".csv"
+
+        if exists(opath):
+            verbose("File", opath, "already converted, skipping")
+            continue
+
+        ipaths.append(ipath)
+        opaths.append(opath)
+
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        executor.map(vital_to_csv, ipaths, opaths, [interval] * len(ipaths))
 
 
 def check_and_move(condition: bool, error_msg: str, src: str, dst: str) -> bool:
@@ -113,7 +120,7 @@ def check_and_move(condition: bool, error_msg: str, src: str, dst: str) -> bool:
     return True
 
 
-def quality_control(vital_path: str, opath: str) -> bool:
+def quality_check(vital_path: str, opath: str) -> bool:
     """Quality control of a vital file, if unfit moves file to opath
 
     Args:
@@ -156,7 +163,7 @@ def quality_control(vital_path: str, opath: str) -> bool:
     return True
 
 
-def folder_quality_control(ifolder: str, ofolder: str, force: bool = False) -> None:
+def folder_quality_check(ifolder: str, ofolder: str, force: bool = False) -> None:
     """Quality control of all vital files in a folder ; multithreaded
 
     Args:
@@ -185,7 +192,7 @@ def folder_quality_control(ifolder: str, ofolder: str, force: bool = False) -> N
     assert len(ipaths) == len(opaths)
 
     with ThreadPoolExecutor(max_workers=4) as executor:
-        futures = list(executor.map(quality_control, ipaths, opaths))
+        futures = list(executor.map(quality_check, ipaths, opaths))
 
     verbose(f"Valid cases : {sum(futures)}/{len(ipaths)}")
 
@@ -252,4 +259,4 @@ if __name__ == "__main__":
     if "-csv" in argv:
         folder_vital_to_csv("data/vital/", "data/csv/", interval=INTERVAL)
     if "-qc" in argv:
-        folder_quality_control("data/vital/", "data/unfit/", force=False)
+        folder_quality_check("data/vital/", "data/unfit/", force=False)
