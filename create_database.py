@@ -100,8 +100,21 @@ def folder_vital_to_csv(ifolder: str, ofolder: str, interval: float = None) -> N
             executor.submit(vital_to_csv, ipath, opath, interval)
 
 
-def quality_control(vital_path: str, ofolder: str) -> bool:
-    """Quality control of a vital file
+def check_and_move(condition: bool, error_msg: str, src: str, dst: str) -> bool:
+    if condition:
+        verbose(error_msg)
+        if not exists(dst):
+            rename(src=src, dst=dst)
+        else:
+            verbose(
+                f"Warning : file {dst} already exists, not removed from input folder"
+            )
+        return False
+    return True
+
+
+def quality_control(vital_path: str, opath: str) -> bool:
+    """Quality control of a vital file, if unfit moves file to opath
 
     Args:
         vital (vdb.VitalFile): vital file to check
@@ -110,26 +123,36 @@ def quality_control(vital_path: str, ofolder: str) -> bool:
         bool: True if ok, False otherwise
     """
     vital = vdb.VitalFile(vital_path)
-    df = vital.to_pandas(vital.get_track_names(), None)
+    track_names = [item.split("/")[-1] for item in vital.get_track_names()]
+    try:
+        df = vital.to_pandas(track_names, None)
+    except ValueError:
+        verbose(f"Could not convert {vital_path} to pandas")
+        rename(src=vital_path, dst=opath)
+        return False
 
     # Delete rows with only nan values
     df.dropna(axis="index", how="all", inplace=True)
 
     # No more than 20% missing data for ART and ART_MPB
-    if df["ART"].isna().sum() > 0.2 * len(df):
-        verbose(f"More than 20% of missing values for ART ({basename(vital_path)})")
+    if not check_and_move(
+        condition=df["ART"].isna().sum() > 0.2 * len(df),
+        error_msg="More than 20% of ART missing",
+        src=vital_path,
+        dst=opath,
+    ):
         return False
     # TODO : Check for ART_MBP, taking into account that it's only
     # present every 1.7 seconds instead of every 1/500 seconds like ART
 
     # No more than 20% of values under 50mmHg for ART_MBP
-    if (df["ART_MBP"] < 50).sum() > 0.2 * len(df):
-        verbose("More than 20% of MAP under 50mmHg")
+    if not check_and_move(
+        condition=(df["ART_MBP"] < 50).sum() > 0.2 * len(df),
+        error_msg="More than 20% of MAP under 50mmHg",
+        src=vital_path,
+        dst=opath,
+    ):
         return False
-
-    # Move file to ofolder
-    rename(src=vital_path, dst=join(ofolder, basename(vital_path)))
-
     return True
 
 
@@ -138,31 +161,33 @@ def folder_quality_control(ifolder: str, ofolder: str, force: bool = False) -> N
 
     Args:
         ifolder (str): path to the folder containing the vital files
-        ofolder (str): path where to save the csv files
+        ofolder (str): path where to save the vital files that don't pass QC
     """
     makedirs(ofolder, exist_ok=True)
     futures = []
-    valid_cases = 0
+
+    ipaths = []
+    opaths = []
+
+    for file in listdir(ifolder):
+        if not file.endswith("vital"):
+            continue
+        ipath = join(ifolder, file)
+        ofilename = basename(ipath)
+        opath = join(ofolder, ofilename)
+
+        if exists(opath) and not force:
+            verbose("File", opath, "already controlled, skipping")
+            continue
+        ipaths.append(ipath)
+        opaths.append(opath)
+
+    assert len(ipaths) == len(opaths)
 
     with ThreadPoolExecutor(max_workers=4) as executor:
-        for file in listdir(ifolder):
-            if not file.endswith("vital"):
-                continue
-            ipath = join(ifolder, file)
-            ofilename = basename(ipath)
-            opath = join(ofolder, ofilename)
+        futures = list(executor.map(quality_control, ipaths, opaths))
 
-            if exists(opath) and not force:
-                verbose("File", opath, "already controlled, skipping")
-                continue
-
-            futures.append(executor.submit(quality_control, ipath, opath))
-
-        for future in as_completed(futures):
-            if future.result():
-                valid_cases += 1
-
-    verbose(f"Valid cases : {valid_cases}/{len(listdir(ifolder))}")
+    verbose(f"Valid cases : {sum(futures)}/{len(ipaths)}")
 
 
 def load_cases(
@@ -220,12 +245,11 @@ INTERVAL = None  # for max res
 TRACKS = ["ART", "ART_MBP", "CI", "SVI", "SVRI", "SVV", "ART_SBP", "ART_DBP"]
 
 if __name__ == "__main__":
-    VERBOSE = input("Verbose ? (y/[n]) ").lower() == "y"
-    if input("Download cases ? (y/[n]) ").lower() == "y":
+    VERBOSE = "-v" in argv
+    if "-dl" in argv:
         case_ids = find_cases(TRACKS)
         download_cases(TRACKS, case_ids)
-
     if "-csv" in argv:
         folder_vital_to_csv("data/vital/", "data/csv/", interval=INTERVAL)
-    if "-quality" in argv:
-        folder_quality_control("data/vital/", "data/quality/", force=True)
+    if "-qc" in argv:
+        folder_quality_control("data/vital/", "data/unfit/", force=False)
