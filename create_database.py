@@ -1,7 +1,7 @@
 from os import listdir, makedirs, remove, rename
 from os.path import exists, join, basename
 from sys import argv
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 
 import pandas as pd
 import vitaldb as vdb
