@@ -12,11 +12,20 @@ def verbose(*args, **kwargs):
         print(*args, **kwargs)
 
 
-def find_cases(track_names: list[str]) -> list[int]:
-    return vdb.find_cases(track_names)
+def find_cases(track_names: list[str], ops: list[str]) -> list[int]:
+    df_cases = pd.read_csv("https://api.vitaldb.net/cases")
+
+    # Cases selection
+    cases_tracks = vdb.find_cases(track_names)
+    op_set = pd.concat([df_cases[df_cases["opname"] == op]["caseid"] for op in ops], axis=1).stack().values
+    cases_ag = df_cases[df_cases["ane_type"] == "General"]["caseid"]
+
+    return list(set(cases_tracks) & set(op_set) & set(cases_ag))
 
 
-def download_case(case_id: int, track_names: list[str], index: int = None) -> None:
+def download_case(
+    case_id: int, track_names: list[str], interval: float = None, index: int = None
+) -> None:
     """Download a single case from the database
 
     Args:
@@ -28,7 +37,7 @@ def download_case(case_id: int, track_names: list[str], index: int = None) -> No
         verbose(f"Case {case_id} already exists")
         return
     try:
-        case = vdb.VitalFile(case_id, track_names)
+        case = vdb.VitalFile(case_id, track_names, interval)
         case.to_vital(opath=f"data/vital/{case_id}.vital")
         if index:
             verbose(f"Downloaded case {case_id} : {index+1}/{len(case_ids)}")
@@ -39,7 +48,9 @@ def download_case(case_id: int, track_names: list[str], index: int = None) -> No
         return
 
 
-def download_cases(track_names: list[str], case_ids: list[int]) -> None:
+def download_cases(
+    track_names: list[str], case_ids: list[int], interval: float = None, max_cases: int = None
+) -> None:
     """Download a list of cases from the VitalDB database ; multithreaded.
 
     Args:
@@ -47,13 +58,16 @@ def download_cases(track_names: list[str], case_ids: list[int]) -> None:
         case_ids (list): list of case ids
     """
     makedirs("data/vital", exist_ok=True)
+    if max_cases:
+        case_ids = case_ids[:min(len(case_ids), max_cases)]
     with ThreadPoolExecutor(max_workers=10) as executor:
         for i, case_id in enumerate(case_ids):
-            executor.submit(download_case, case_id, track_names, i)
+            executor.submit(download_case, case_id, track_names, interval, i)
 
 
 def vital_to_csv(ipath: str, opath: str, interval: float = None) -> None:
     """Convert vital file to csv
+    NB : csv files are ~25 times bigger than vital files
 
     Args:
         ipath (str): path to the vital file to convert
@@ -75,6 +89,7 @@ def vital_to_csv(ipath: str, opath: str, interval: float = None) -> None:
 
 def folder_vital_to_csv(ifolder: str, ofolder: str, interval: float = None) -> None:
     """Convert all vital files in a folder to csv ; multithreaded
+    NB : csv files are ~25 times bigger than vital files
 
     Args:
         ifolder (str): path to the folder containing the vital files
@@ -197,65 +212,38 @@ def folder_quality_check(ifolder: str, ofolder: str, force: bool = False) -> Non
     verbose(f"Valid cases : {sum(futures)}/{len(ipaths)}")
 
 
-def load_cases(
-    track_names: list[str],
-    dir_path: str,
-    case_ids: list[int] = None,
-    num_cases: int = None,
-) -> tuple[dict[pd.DataFrame], list[int]]:
-    """Load a list of cases from the local database
-
-    Args:
-        track_names (list[str]): list of track names
-        dir_path (str): path of files folder
-        case_ids (list[int]): list of case ids
-        num_cases (int): maximum number of cases to load
-
-    Returns:
-        dict[pd.DataFrame]: dictionnary with case id as key and case dataframe as value
-        list[int]: list of all case_id loaded
-    """
-    cases: dict[pd.DataFrame] = dict()
-    ids = []
-    i = 0
-
-    for file in listdir(dir_path):
-        i += 1
-        if not file.endswith(".vital"):
-            continue
-        try:
-            case_id = int(file[: file.index(".")])
-        except ValueError:  # file n'a pas d'extension visible, on ignore
-            continue
-
-        if case_ids and case_id not in case_ids:
-            continue
-
-        if num_cases and i > num_cases:
-            break
-
-        filename = f"data/vital/{case_id}.vital"
-        if exists(filename):
-            verbose(f"Loading case {case_id}")
-            vital = vdb.VitalFile(ipath=filename, track_names=track_names)
-            case_df = vital.to_pandas(track_names=track_names, interval=INTERVAL)
-            cases[case_id] = case_df
-            ids.append(case_id)
-        else:
-            verbose(f"Case {case_id} does not exist locally")
-    return cases, ids
-
-
 VERBOSE = False
 INTERVAL = None  # for max res
 
-TRACKS = ["ART", "ART_MBP", "CI", "SVI", "SVRI", "SVV", "ART_SBP", "ART_DBP"]
+TRACKS = [
+    "ART",
+    "ART_MBP",
+    "ART_SBP",
+    "ART_DBP",
+    "PLETH_SPO2",
+    "RR_CO2",
+]
+OPS = [
+    "Cholecystectomy",
+    "Distal gastrectomy",
+    "Distal pancreatectomy",
+    "Exploratory laparotomy",
+    "Hemicolectomy",
+    "Hernia repair",
+    "Low anterior resection",
+    "Lung lobectomy",
+    "Lung segmentectomy",
+    "Lung wedge resection",
+    "Thyroid lobectomy",
+    "Total thyroidectomy",
+]
 
 if __name__ == "__main__":
     VERBOSE = "-v" in argv
     if "-dl" in argv:
-        case_ids = find_cases(TRACKS)
-        download_cases(TRACKS, case_ids)
+        max_cases = int(input("Number of cases to download : "))
+        case_ids = find_cases(TRACKS, OPS)
+        download_cases(TRACKS, case_ids, max_cases=max_cases)
     if "-csv" in argv:
         folder_vital_to_csv("data/vital/", "data/csv/", interval=INTERVAL)
     if "-qc" in argv:
