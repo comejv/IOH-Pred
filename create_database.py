@@ -17,14 +17,21 @@ def find_cases(track_names: list[str], ops: list[str]) -> list[int]:
 
     # Cases selection
     cases_tracks = vdb.find_cases(track_names)
-    op_set = pd.concat([df_cases[df_cases["opname"] == op]["caseid"] for op in ops], axis=1).stack().values
+    op_set = (
+        pd.concat([df_cases[df_cases["opname"] == op]["caseid"] for op in ops], axis=1)
+        .stack()
+        .values
+    )
     cases_ag = df_cases[df_cases["ane_type"] == "General"]["caseid"]
 
     return list(set(cases_tracks) & set(op_set) & set(cases_ag))
 
 
 def download_case(
-    case_id: int, track_names: list[str], interval: float = None, index: int = None
+    case_id: int,
+    track_names: list[str],
+    interval: float = None,
+    index: tuple[int, int] = None,
 ) -> None:
     """Download a single case from the database
 
@@ -38,9 +45,11 @@ def download_case(
         return
     try:
         case = vdb.VitalFile(case_id, track_names, interval)
+        # Rename tracks
+        # case.rename_tracks(mapping)
         case.to_vital(opath=f"data/vital/{case_id}.vital")
         if index:
-            verbose(f"Downloaded case {case_id} : {index+1}/{len(case_ids)}")
+            verbose(f"Downloaded case {case_id} : {index[0]+1}/{index[1]}")
         else:
             verbose(f"Downloaded case {case_id}")
     except KeyboardInterrupt:
@@ -49,7 +58,10 @@ def download_case(
 
 
 def download_cases(
-    track_names: list[str], case_ids: list[int], interval: float = None, max_cases: int = None
+    track_names: list[str],
+    case_ids: list[int],
+    interval: float = None,
+    max_cases: int = None,
 ) -> None:
     """Download a list of cases from the VitalDB database ; multithreaded.
 
@@ -59,10 +71,12 @@ def download_cases(
     """
     makedirs("data/vital", exist_ok=True)
     if max_cases:
-        case_ids = case_ids[:min(len(case_ids), max_cases)]
+        case_ids = case_ids[: min(len(case_ids), max_cases)]
     with ThreadPoolExecutor(max_workers=10) as executor:
         for i, case_id in enumerate(case_ids):
-            executor.submit(download_case, case_id, track_names, interval, i)
+            executor.submit(
+                download_case, case_id, track_names, interval, (i, len(case_ids))
+            )
 
 
 def vital_to_csv(ipath: str, opath: str, interval: float = None) -> None:
@@ -135,57 +149,60 @@ def check_and_move(condition: bool, error_msg: str, src: str, dst: str) -> bool:
     return True
 
 
-def quality_check(vital_path: str, opath: str) -> bool:
-    """Quality control of a vital file, if unfit moves file to opath
+def preprocessing(ifile: str, ofile: str) -> bool:
+    """Preprocessing of a vital file
 
     Args:
-        vital (vdb.VitalFile): vital file to check
+        vital (str): path to the vital file to preprocess
 
     Returns:
-        bool: True if ok, False otherwise
+        bool: True if preprocessing was successful
     """
-    vital = vdb.VitalFile(vital_path)
-    track_names = [item.split("/")[-1] for item in vital.get_track_names()]
-    try:
-        df = vital.to_pandas(track_names, None)
-    except ValueError:
-        verbose(f"Could not convert {vital_path} to pandas")
-        rename(src=vital_path, dst=opath)
-        return False
+    vital = vdb.VitalFile(ifile)
+    track_names = vital.get_track_names()
+    df = vital.to_pandas(track_names, INTERVAL)
 
     # Delete rows with only nan values
-    df.dropna(axis="index", how="all", inplace=True)
+    df.dropna(axis="index", subset=["SNUADC/ART"], inplace=True)
 
-    # No more than 20% missing data for ART and ART_MPB
-    if not check_and_move(
-        condition=df["ART"].isna().sum() > 0.2 * len(df),
-        error_msg="More than 20% of ART missing",
-        src=vital_path,
-        dst=opath,
-    ):
-        return False
-    # TODO : Check for ART_MBP, taking into account that it's only
-    # present every 1.7 seconds instead of every 1/500 seconds like ART
+    # Number of rows in a minute
+    timeframe = int(1 / INTERVAL * 120)
 
-    # No more than 20% of values under 50mmHg for ART_MBP
-    if not check_and_move(
-        condition=(df["ART_MBP"] < 50).sum() > 0.2 * len(df),
-        error_msg="More than 20% of MAP under 50mmHg",
-        src=vital_path,
-        dst=opath,
-    ):
+    # Delete rows from begining to first minute with 80% of ART values above 40mmHg
+    mask = df["SNUADC/ART"] > 40
+    rolling_sum = mask.rolling(window=timeframe).sum()
+    if (rolling_sum >= timeframe).sum() < timeframe * 30:
+        rename(ifile, "data/unfit/" + basename(ifile))
+        verbose("File", ifile, "unfit")
         return False
+    start_of_ag = rolling_sum[rolling_sum >= 0.9 * timeframe].idxmin()
+
+    # Delete rows after last minute with 80% of ART values above 40mmHg
+    end_of_ag = (rolling_sum[rolling_sum >= 0.8 * timeframe]).iloc[::-1].idxmax() + timeframe
+
+    df = df.iloc[start_of_ag : end_of_ag - start_of_ag]
+
+    # Fill missing values from undersampled columns
+    df.fillna(method="ffill", inplace=True)
+    df.fillna(method="bfill", inplace=True)
+
+    # Pickle the dataframe
+    df.to_pickle(ofile)
+
+    verbose("File", ifile, "preprocessed and pickled")
+
     return True
 
 
-def folder_quality_check(ifolder: str, ofolder: str, force: bool = False) -> None:
-    """Quality control of all vital files in a folder ; multithreaded
+def folder_preprocessing(ifolder: str, ofolder: str, force: bool = False) -> None:
+    """Quality control and preprocessing of all vital files in a folder ; multithreaded
 
     Args:
         ifolder (str): path to the folder containing the vital files
         ofolder (str): path where to save the vital files that don't pass QC
     """
     makedirs(ofolder, exist_ok=True)
+    makedirs("data/unfit", exist_ok=True)
     futures = []
 
     ipaths = []
@@ -195,33 +212,31 @@ def folder_quality_check(ifolder: str, ofolder: str, force: bool = False) -> Non
         if not file.endswith("vital"):
             continue
         ipath = join(ifolder, file)
-        ofilename = basename(ipath)
+        ofilename = basename(ipath)[:-5] + "pkl"
         opath = join(ofolder, ofilename)
 
         if exists(opath) and not force:
-            verbose("File", opath, "already controlled, skipping")
+            verbose("File", opath, "already preprocessed, skipping")
             continue
         ipaths.append(ipath)
         opaths.append(opath)
 
-    assert len(ipaths) == len(opaths)
+    assert len(ipaths) == len(opaths), "Number of files does not match"
 
     with ThreadPoolExecutor(max_workers=4) as executor:
-        futures = list(executor.map(quality_check, ipaths, opaths))
+        futures = list(executor.map(preprocessing, ipaths, opaths))
 
     verbose(f"Valid cases : {sum(futures)}/{len(ipaths)}")
 
 
 VERBOSE = False
-INTERVAL = None  # for max res
+INTERVAL = 1 / 100
 
 TRACKS = [
     "ART",
-    "ART_MBP",
-    "ART_SBP",
-    "ART_DBP",
-    "PLETH_SPO2",
-    "RR_CO2",
+    "Solar8000/PLETH_SPO2",
+    "Orchestra/PPF20_CP",
+    "Primus/CO2",
 ]
 OPS = [
     "Cholecystectomy",
@@ -238,6 +253,7 @@ OPS = [
     "Total thyroidectomy",
 ]
 
+
 if __name__ == "__main__":
     VERBOSE = "-v" in argv
     if "-dl" in argv:
@@ -246,5 +262,7 @@ if __name__ == "__main__":
         download_cases(TRACKS, case_ids, max_cases=max_cases)
     if "-csv" in argv:
         folder_vital_to_csv("data/vital/", "data/csv/", interval=INTERVAL)
-    if "-qc" in argv:
-        folder_quality_check("data/vital/", "data/unfit/", force=False)
+    if "-pre" in argv:
+        folder_preprocessing("data/vital", "data/preprocessed")
+    elif "-pref" in argv:
+        folder_preprocessing("data/vital", "data/preprocessed", force=True)
