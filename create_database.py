@@ -149,7 +149,24 @@ def check_and_move(condition: bool, error_msg: str, src: str, dst: str) -> bool:
     return True
 
 
-def preprocessing(ifile: str, ofile: str) -> bool:
+def test_hypothension(case_name: str, case: pd.DataFrame, ofolder: str) -> None:
+    """Test for hypohetnsion in a case
+
+    Args:
+        case (pd.DataFrame): case
+    """
+    # Hypotension event if more than 1 min of consecutive MAP below 65mmHg
+    # MAP is mean average of SNUADC/ART, moving window of 2 seconds
+    art_avg = case["SNUADC/ART"].rolling(window=2 * ECH_RATE_HZ).mean()
+    mask = art_avg < 65
+    if (mask.rolling(window=60 * ECH_RATE_HZ).sum() > 1).sum() > 0:
+        # Pickle the dataframe
+        case.to_pickle(join(ofolder, f"event/{case_name}.pkl"))
+    else:
+        case.to_pickle(join(ofolder, f"nonevent/{case_name}.pkl"))
+
+
+def preprocessing(ifile: str, ofolder: str) -> bool:
     """Preprocessing of a vital file
 
     Args:
@@ -160,25 +177,27 @@ def preprocessing(ifile: str, ofile: str) -> bool:
     """
     vital = vdb.VitalFile(ifile)
     track_names = vital.get_track_names()
-    df = vital.to_pandas(track_names, INTERVAL)
+    df = vital.to_pandas(track_names, 1 / ECH_RATE_HZ)
 
     # Delete rows with only nan values
     df.dropna(axis="index", subset=["SNUADC/ART"], inplace=True)
 
     # Number of rows in a minute
-    timeframe = int(1 / INTERVAL * 120)
+    timeframe = ECH_RATE_HZ
 
     # Delete rows from begining to first minute with 80% of ART values above 40mmHg
     mask = df["SNUADC/ART"] > 40
     rolling_sum = mask.rolling(window=timeframe).sum()
     if (rolling_sum >= timeframe).sum() < timeframe * 30:
-        rename(ifile, "data/unfit/" + basename(ifile))
+        rename(ifile, join("data/unfit/", basename(ifile)))
         verbose("File", ifile, "unfit")
         return False
     start_of_ag = rolling_sum[rolling_sum >= 0.9 * timeframe].idxmin()
 
     # Delete rows after last minute with 80% of ART values above 40mmHg
-    end_of_ag = (rolling_sum[rolling_sum >= 0.8 * timeframe]).iloc[::-1].idxmax() + timeframe
+    end_of_ag = (rolling_sum[rolling_sum >= 0.8 * timeframe]).iloc[
+        ::-1
+    ].idxmax() + timeframe
 
     df = df.iloc[start_of_ag : end_of_ag - start_of_ag]
 
@@ -186,8 +205,8 @@ def preprocessing(ifile: str, ofile: str) -> bool:
     df.fillna(method="ffill", inplace=True)
     df.fillna(method="bfill", inplace=True)
 
-    # Pickle the dataframe
-    df.to_pickle(ofile)
+    # Test for hypothension
+    test_hypothension(basename(ifile)[:-6], df, ofolder)
 
     verbose("File", ifile, "preprocessed and pickled")
 
@@ -201,7 +220,10 @@ def folder_preprocessing(ifolder: str, ofolder: str, force: bool = False) -> Non
         ifolder (str): path to the folder containing the vital files
         ofolder (str): path where to save the vital files that don't pass QC
     """
-    makedirs(ofolder, exist_ok=True)
+    evt_folder = join(ofolder, "event")
+    makedirs(evt_folder, exist_ok=True)
+    nonevt_folder = join(ofolder, "nonevent")
+    makedirs(nonevt_folder, exist_ok=True)
     makedirs("data/unfit", exist_ok=True)
     futures = []
 
@@ -213,13 +235,15 @@ def folder_preprocessing(ifolder: str, ofolder: str, force: bool = False) -> Non
             continue
         ipath = join(ifolder, file)
         ofilename = basename(ipath)[:-5] + "pkl"
-        opath = join(ofolder, ofilename)
 
-        if exists(opath) and not force:
-            verbose("File", opath, "already preprocessed, skipping")
+        if (
+            exists(join(evt_folder, ofilename))
+            or exists(join(nonevt_folder, ofilename))
+        ) and not force:
+            verbose("File", ofilename, "already preprocessed, skipping")
             continue
         ipaths.append(ipath)
-        opaths.append(opath)
+        opaths.append(ofolder)
 
     assert len(ipaths) == len(opaths), "Number of files does not match"
 
@@ -230,7 +254,7 @@ def folder_preprocessing(ifolder: str, ofolder: str, force: bool = False) -> Non
 
 
 VERBOSE = False
-INTERVAL = 1 / 100
+ECH_RATE_HZ = 100  # in Hz
 
 TRACKS = [
     "ART",
@@ -261,7 +285,7 @@ if __name__ == "__main__":
         case_ids = find_cases(TRACKS, OPS)
         download_cases(TRACKS, case_ids, max_cases=max_cases)
     if "-csv" in argv:
-        folder_vital_to_csv("data/vital/", "data/csv/", interval=INTERVAL)
+        folder_vital_to_csv("data/vital/", "data/csv/", interval=ECH_RATE_HZ)
     if "-pre" in argv:
         folder_preprocessing("data/vital", "data/preprocessed")
     elif "-pref" in argv:
