@@ -9,14 +9,12 @@
 
 The goal of this project is to train a machine learning model to predict IOH events before they occur.
 
-## Table of contents
-
 <details>
 <summary>Table of contents</summary>
 <ol>
-<li><a href="#intro">Introduction</a></li>
+<li><a href="#intra-operative-hypotension-prediction">Introduction</a></li>
 <li><a href="#roadmap">Roadmap</a></li>
-<li><a href="#data">Data</a></li>
+<li><a href="#data-used">Data used</a></li>
 <li><a href="#usage">Usage</a></li>
 </ol>
 </details>
@@ -24,7 +22,7 @@ The goal of this project is to train a machine learning model to predict IOH eve
 ## Roadmap
 
 - [x] Selecting, downloading and cleaning up data
-- [ ] Preprocessing the data [IN PROGRESS]
+- [ ] [IN PROGRESS] Preprocessing the data 
 - [ ] Training the model
 - [ ] Evaluating the model
 
