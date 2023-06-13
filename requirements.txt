@@ -1,2 +1,3 @@
 vitaldb
 pandas
+matplotlib
