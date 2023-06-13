@@ -57,8 +57,8 @@ You can visualize the data with the following command :
 python plotting.py
 ```
 The resulting matplotlib figure will look like this :
-![Plotted cases](imgs/TP1.png)
+![Plotted cases](imgs/3476.png)
 This view combines both the raw and preprocessed data.
-Blue and green zones are deleted from the raw data (preanesthesia and postanesthesia).
-Arterial pressure is drawn in purple and overlayed with mean arterial pressure.
-IOH events are marked with a red vertical line.
+Gray zones are before and after anesthesia, so they are cropped in the processing.
+Arterial pressure is drawn in blue and overlayed with mean arterial pressure in orange.
+IOH events are marked with a red vertical line 1 minute wide.
