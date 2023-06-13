@@ -9,7 +9,11 @@ plotting = True
 
 while plotting:
     # Case selection
-    caseid = int(input("Case ID: "))
+    try:
+        caseid = int(input("Case ID: "))
+    except ValueError:
+        break
+
     if not exists(f"/local/vincenco/IOH-Pred/data/vital/{caseid}.vital") or not exists(
         f"/local/vincenco/IOH-Pred/data/preprocessed/event/{caseid}.pkl"
     ):
