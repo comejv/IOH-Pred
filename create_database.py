@@ -222,7 +222,7 @@ def preprocessing(ifile: str, ofolder: str) -> bool:
         & (df["Solar8000/ART_MBP"] < map_upper)
     ]
 
-    # df.reset_index(inplace=True, drop=True)
+    df.reset_index(inplace=True, drop=True)
 
     # Test for hypothension
     test_hypothension(basename(ifile)[:-6], df, ofolder)
@@ -266,7 +266,7 @@ def folder_preprocessing(ifolder: str, ofolder: str, force: bool = False) -> Non
 
     assert len(ipaths) == len(opaths), "Number of files does not match"
 
-    with ThreadPoolExecutor(max_workers=4) as executor:
+    with ThreadPoolExecutor(max_workers=10) as executor:
         futures = list(executor.map(preprocessing, ipaths, opaths))
 
     verbose(f"Valid cases : {sum(futures)}/{len(ipaths)}")
@@ -278,9 +278,9 @@ env = json.load(env_file)
 TRACKS = env["tracks"]
 OPS = env["operations"]
 SAMPLING_RATE = env["samplingRate"]
+VERBOSE = env["verbose"]
 
 if __name__ == "__main__":
-    VERBOSE = "-v" in argv
     if "-dl" in argv:
         max_cases = int(input("Number of cases to download : "))
         case_ids = find_cases(TRACKS, OPS)
