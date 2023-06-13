@@ -10,7 +10,10 @@ __pycache__/
 .vscode
 
 # VitalDB cases
-data/
+data
 
 # Other papers
 Extern
+
+# Tests
+test*
