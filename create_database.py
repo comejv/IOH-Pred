@@ -4,6 +4,8 @@ from os.path import exists, join, basename
 from sys import argv
 from concurrent.futures import ThreadPoolExecutor
 
+from statistics import mean, stdev
+
 import pandas as pd
 import vitaldb as vdb
 
@@ -159,10 +161,11 @@ def test_hypothension(case_name: str, case: pd.DataFrame, ofolder: str) -> None:
     # Hypotension event if more than 1 min of consecutive MAP below 65mmHg
     # MAP is mean average of SNUADC/ART, moving window of 2 seconds
     mask = case["Solar8000/ART_MBP"].lt(65)
-    idxs = case.index[mask.rolling(window=60 * SAMPLING_RATE, axis=0).apply(lambda x: x.all(), raw=True) == True]
-    if not idxs.empty:
-        # Pickle the dataframe
-        case.to_pickle(join(ofolder, f"event/{case_name}.pkl"))
+    # idxs = case.index[mask.rolling(window=60 * SAMPLING_RATE, axis=0).apply(lambda x: x.all(), raw=True) == True]
+    for i in range(len(mask) - 60 * SAMPLING_RATE):
+        if all(mask[i : i + 60 * SAMPLING_RATE]):
+            case.to_pickle(join(ofolder, f"event/{case_name}.pkl"))
+            break
     else:
         case.to_pickle(join(ofolder, f"nonevent/{case_name}.pkl"))
 
@@ -171,7 +174,8 @@ def preprocessing(ifile: str, ofolder: str) -> bool:
     """Preprocessing of a vital file
 
     Args:
-        vital (str): path to the vital file to preprocess
+        ifile (str): path to the vital file
+        ofolder (str): path where to save the csv
 
     Returns:
         bool: True if preprocessing was successful
@@ -205,6 +209,20 @@ def preprocessing(ifile: str, ofolder: str) -> bool:
     # Fill missing values from undersampled columns
     df.fillna(method="ffill", inplace=True)
     df.fillna(method="bfill", inplace=True)
+
+    # Deleting outliers in ART and MAP
+    art_mean, art_std = df["SNUADC/ART"].mean(), df["SNUADC/ART"].std()
+    map_mean, map_std = df["Solar8000/ART_MBP"].mean(), df["Solar8000/ART_MBP"].std()
+    art_lower, art_upper = art_mean - 2 * art_std, art_mean + 2 * art_std
+    map_lower, map_upper = map_mean - 2 * map_std, map_mean + 2 * map_std
+    df = df[
+        (df["SNUADC/ART"] > art_lower)
+        & (df["SNUADC/ART"] < art_upper)
+        & (df["Solar8000/ART_MBP"] > map_lower)
+        & (df["Solar8000/ART_MBP"] < map_upper)
+    ]
+
+    # df.reset_index(inplace=True, drop=True)
 
     # Test for hypothension
     test_hypothension(basename(ifile)[:-6], df, ofolder)
@@ -268,8 +286,18 @@ if __name__ == "__main__":
         case_ids = find_cases(TRACKS, OPS)
         download_cases(TRACKS, case_ids, max_cases=max_cases)
     if "-csv" in argv:
-        folder_vital_to_csv(join(env["dataFolder"], "vital/"), join(env["dataFolder"], "csv/"), interval=SAMPLING_RATE)
+        folder_vital_to_csv(
+            join(env["dataFolder"], "vital/"),
+            join(env["dataFolder"], "csv/"),
+            interval=SAMPLING_RATE,
+        )
     if "-pre" in argv:
-        folder_preprocessing(join(env["dataFolder"], "vital"), join(env["dataFolder"], "preprocessed"))
+        folder_preprocessing(
+            join(env["dataFolder"], "vital"), join(env["dataFolder"], "preprocessed")
+        )
     elif "-pref" in argv:
-        folder_preprocessing(join(env["dataFolder"], "vital"), join(env["dataFolder"], "preprocessed"), force=True)
+        folder_preprocessing(
+            join(env["dataFolder"], "vital"),
+            join(env["dataFolder"], "preprocessed"),
+            force=True,
+        )
