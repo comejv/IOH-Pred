@@ -35,6 +35,8 @@ The python script used to process the data is in [create_database.py](create_dat
 
 ### Downloading and preprocessing the data
 
+> Note that download and preprocessing of the data are multithreaded.
+
 You should first set up the environment by removing the `.dist` extension from [env.json.dist](env.json.dist) and change its settings as you see fit.
 ```bash
 python create_database.py -dl
