@@ -1,3 +1,4 @@
+import json
 from os import listdir, makedirs, remove, rename
 from os.path import exists, join, basename
 from sys import argv
@@ -40,14 +41,14 @@ def download_case(
         track_names (list[str]): list of track names
         index (int, optional): Counter of the current case being downloaded. Defaults to None.
     """
-    if exists(f"data/vital/{case_id}.vital"):
+    if exists(join(env["dataFolder"], f"vital/{case_id}.vital")):
         verbose(f"Case {case_id} already exists")
         return
     try:
         case = vdb.VitalFile(case_id, track_names, interval)
         # Rename tracks
         # case.rename_tracks(mapping)
-        case.to_vital(opath=f"data/vital/{case_id}.vital")
+        case.to_vital(opath=join(env["dataFolder"], f"vital/{case_id}.vital"))
         if index:
             verbose(f"Downloaded case {case_id} : {index[0]+1}/{index[1]}")
         else:
@@ -69,7 +70,7 @@ def download_cases(
         track_names (list): list of track names
         case_ids (list): list of case ids
     """
-    makedirs("data/vital", exist_ok=True)
+    makedirs(join(env["dataFolder"], "vital"), exist_ok=True)
     if max_cases:
         case_ids = case_ids[: min(len(case_ids), max_cases)]
     with ThreadPoolExecutor(max_workers=10) as executor:
@@ -157,9 +158,9 @@ def test_hypothension(case_name: str, case: pd.DataFrame, ofolder: str) -> None:
     """
     # Hypotension event if more than 1 min of consecutive MAP below 65mmHg
     # MAP is mean average of SNUADC/ART, moving window of 2 seconds
-    art_avg = case["SNUADC/ART"].rolling(window=2 * ECH_RATE_HZ).mean()
-    mask = art_avg < 65
-    if (mask.rolling(window=60 * ECH_RATE_HZ).sum() > 1).sum() > 0:
+    mask = case["Solar8000/ART_MBP"].lt(65)
+    idxs = case.index[mask.rolling(window=60 * SAMPLING_RATE, axis=0).apply(lambda x: x.all(), raw=True) == True]
+    if not idxs.empty:
         # Pickle the dataframe
         case.to_pickle(join(ofolder, f"event/{case_name}.pkl"))
     else:
@@ -177,19 +178,19 @@ def preprocessing(ifile: str, ofolder: str) -> bool:
     """
     vital = vdb.VitalFile(ifile)
     track_names = vital.get_track_names()
-    df = vital.to_pandas(track_names, 1 / ECH_RATE_HZ)
+    df = vital.to_pandas(track_names, 1 / SAMPLING_RATE)
 
     # Delete rows with only nan values
     df.dropna(axis="index", subset=["SNUADC/ART"], inplace=True)
 
     # Number of rows in a minute
-    timeframe = ECH_RATE_HZ
+    timeframe = SAMPLING_RATE
 
     # Delete rows from begining to first minute with 80% of ART values above 40mmHg
     mask = df["SNUADC/ART"] > 40
     rolling_sum = mask.rolling(window=timeframe).sum()
     if (rolling_sum >= timeframe).sum() < timeframe * 30:
-        rename(ifile, join("data/unfit/", basename(ifile)))
+        rename(ifile, join(join(env["dataFolder"], "unfit/"), basename(ifile)))
         verbose("File", ifile, "unfit")
         return False
     start_of_ag = rolling_sum[rolling_sum >= 0.9 * timeframe].idxmin()
@@ -224,7 +225,7 @@ def folder_preprocessing(ifolder: str, ofolder: str, force: bool = False) -> Non
     makedirs(evt_folder, exist_ok=True)
     nonevt_folder = join(ofolder, "nonevent")
     makedirs(nonevt_folder, exist_ok=True)
-    makedirs("data/unfit", exist_ok=True)
+    makedirs(join(env["dataFolder"], "unfit"), exist_ok=True)
     futures = []
 
     ipaths = []
@@ -253,30 +254,12 @@ def folder_preprocessing(ifolder: str, ofolder: str, force: bool = False) -> Non
     verbose(f"Valid cases : {sum(futures)}/{len(ipaths)}")
 
 
-VERBOSE = False
-ECH_RATE_HZ = 100  # in Hz
+env_file = open("env.json", "r")
+env = json.load(env_file)
 
-TRACKS = [
-    "ART",
-    "Solar8000/PLETH_SPO2",
-    "Orchestra/PPF20_CP",
-    "Primus/CO2",
-]
-OPS = [
-    "Cholecystectomy",
-    "Distal gastrectomy",
-    "Distal pancreatectomy",
-    "Exploratory laparotomy",
-    "Hemicolectomy",
-    "Hernia repair",
-    "Low anterior resection",
-    "Lung lobectomy",
-    "Lung segmentectomy",
-    "Lung wedge resection",
-    "Thyroid lobectomy",
-    "Total thyroidectomy",
-]
-
+TRACKS = env["tracks"]
+OPS = env["operations"]
+SAMPLING_RATE = env["samplingRate"]
 
 if __name__ == "__main__":
     VERBOSE = "-v" in argv
@@ -285,8 +268,8 @@ if __name__ == "__main__":
         case_ids = find_cases(TRACKS, OPS)
         download_cases(TRACKS, case_ids, max_cases=max_cases)
     if "-csv" in argv:
-        folder_vital_to_csv("data/vital/", "data/csv/", interval=ECH_RATE_HZ)
+        folder_vital_to_csv(join(env["dataFolder"], "vital/"), join(env["dataFolder"], "csv/"), interval=SAMPLING_RATE)
     if "-pre" in argv:
-        folder_preprocessing("data/vital", "data/preprocessed")
+        folder_preprocessing(join(env["dataFolder"], "vital"), join(env["dataFolder"], "preprocessed"))
     elif "-pref" in argv:
-        folder_preprocessing("data/vital", "data/preprocessed", force=True)
+        folder_preprocessing(join(env["dataFolder"], "vital"), join(env["dataFolder"], "preprocessed"), force=True)
