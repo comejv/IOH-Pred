@@ -1,12 +1,32 @@
 <p align="center">
 <img alt="GitHub top language" src="https://img.shields.io/github/languages/top/comejv/IOH-Pred">
 <img alt="GitHub repo size" src="https://img.shields.io/github/repo-size/comejv/IOH-Pred">
+<img alt="GitHub commit activity" src="https://img.shields.io/github/commit-activity/w/comejv/IOH-Pred">
 </p>
 
 # Intra Operative Hypotension prediction
 > Internship project at [VERIMAG](https://www.verimag.fr/)
 
 The goal of this project is to train a machine learning model to predict IOH events before they occur.
+
+## Table of contents
+
+<details>
+<summary>Table of contents</summary>
+<ol>
+<li><a href="#intro">Introduction</a></li>
+<li><a href="#roadmap">Roadmap</a></li>
+<li><a href="#data">Data</a></li>
+<li><a href="#usage">Usage</a></li>
+</ol>
+</details>
+
+## Roadmap
+
+- [x] Selecting, downloading and cleaning up data
+- [ ] Preprocessing the data [IN PROGRESS]
+- [ ] Training the model
+- [ ] Evaluating the model
 
 ## Data used
 
