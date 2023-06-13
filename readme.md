@@ -29,7 +29,7 @@ The goal of this project is to train a machine learning model to predict IOH eve
 ## Data used
 
 Our training data come from the [VitalDB](https://vitaldb.net/) open dataset.
-The python script used to process the data is in [create_database.py](create_database.py).
+The python script used to process the data is in [create_dataset.py](create_dataset.py).
 
 ## Usage
 
@@ -39,15 +39,15 @@ The python script used to process the data is in [create_database.py](create_dat
 
 You should first set up the environment by removing the `.dist` extension from [env.json.dist](env.json.dist) and change its settings as you see fit.
 ```bash
-python create_database.py -dl
+python create_dataset.py -dl
 ```
 You can then preprocess the data :
 ```bash
-python create_database.py -pre
+python create_dataset.py -pre
 ```
 These two options can be combined in one command :
 ```bash
-python create_database.py -dl -pre
+python create_dataset.py -dl -pre
 ```
 
 ### Visualizing the preprocessed data
