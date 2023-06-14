@@ -36,6 +36,8 @@ while plotting:
 
     if input("Stacked? (y/n)") == "y":
 
+        processesed.reset_index(inplace=True, drop=True)
+
         mask = original["SNUADC/ART"] > 40
         rolling_sum = mask.rolling(window=timeframe).sum()
         ag_start = rolling_sum[rolling_sum >= 0.9 * timeframe].idxmin()
