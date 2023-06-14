@@ -3,8 +3,15 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from vitaldb import VitalFile
 
-ECH_RATE_HZ = 100
-timeframe = ECH_RATE_HZ * 60
+import json
+
+env_file = open("env.json", "r")
+env = json.load(env_file)
+env_file.close()
+
+SAMPLING_RATE = env["samplingRate"]
+DATA_FOLDER = env["dataFolder"]
+timeframe = SAMPLING_RATE * 60
 plotting = True
 
 while plotting:
@@ -14,24 +21,24 @@ while plotting:
     except ValueError:
         break
 
-    if not exists(f"/local/vincenco/IOH-Pred/data/vital/{caseid}.vital"):
+    if not exists(f"{DATA_FOLDER}vital/{caseid}.vital"):
         print("Case does not exist (missing vital file)")
         continue
 
-    if exists(f"/local/vincenco/IOH-Pred/data/preprocessed/event/{caseid}.pkl"):
+    if exists(f"{DATA_FOLDER}preprocessed/event/{caseid}.pkl"):
         event = "event"
-    elif exists(f"/local/vincenco/IOH-Pred/data/preprocessed/nonevent/{caseid}.pkl"):
+    elif exists(f"{DATA_FOLDER}preprocessed/nonevent/{caseid}.pkl"):
         event = "nonevent"
     else:
         print("Not pickled")
         continue
 
     # read pickled dataframes
-    vtf = VitalFile(f"/local/vincenco/IOH-Pred/data/vital/{caseid}.vital")
+    vtf = VitalFile(f"{DATA_FOLDER}vital/{caseid}.vital")
     original = vtf.to_pandas(["SNUADC/ART", "Solar8000/ART_MBP"], 1 / 100)
 
     processesed = pd.read_pickle(
-        f"/local/vincenco/IOH-Pred/data/preprocessed/{event}/{caseid}.pkl"
+        f"{DATA_FOLDER}preprocessed/{event}/{caseid}.pkl"
     )
 
     if input("Stacked? (y/n)") == "y":
@@ -48,7 +55,7 @@ while plotting:
 
         mask = processesed["Solar8000/ART_MBP"].lt(65)
         idxs = processesed.index[
-            mask.rolling(window=60 * ECH_RATE_HZ, axis=0).apply(lambda x: x.all(), raw=True)
+            mask.rolling(window=60 * SAMPLING_RATE, axis=0).apply(lambda x: x.all(), raw=True)
             == True
         ]
 
@@ -64,8 +71,8 @@ while plotting:
         else:
             idx_prev = 0
             for idx in idxs:
-                if idx - idx_prev >= 60 * ECH_RATE_HZ:
-                    plot.axvspan(idx - 60 * ECH_RATE_HZ, idx, color="red", alpha=0.3)
+                if idx - idx_prev >= 60 * SAMPLING_RATE:
+                    plot.axvspan(idx - 60 * SAMPLING_RATE, idx, color="red", alpha=0.3)
                 idx_prev = idx
 
     else:
