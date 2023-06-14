@@ -171,7 +171,7 @@ def test_hypothension(case_name: str, case: pd.DataFrame, ofolder: str) -> None:
 
 
 def preprocessing(ifile: str, ofolder: str) -> bool:
-    """Preprocessing of a vital file
+    """Preprocessing and pickling of a vital file
 
     Args:
         ifile (str): path to the vital file
@@ -188,12 +188,15 @@ def preprocessing(ifile: str, ofolder: str) -> bool:
     df.dropna(axis="index", subset=["SNUADC/ART"], inplace=True)
 
     # Number of rows in a minute
-    timeframe = SAMPLING_RATE
+    timeframe = SAMPLING_RATE * 60
 
-    # Delete rows from begining to first minute with 80% of ART values above 40mmHg
-    mask = df["SNUADC/ART"] > 40
-    rolling_sum = mask.rolling(window=timeframe).sum()
-    if (rolling_sum >= timeframe).sum() < timeframe * 30:
+    mask_art = (df["SNUADC/ART"] > 30) & (df["SNUADC/ART"] < 160)
+    rolling_sum = mask_art.rolling(window=timeframe).sum()
+    # If less than 30 minutes of valid data or less than 70% of MAP, case is unfit
+    # Note : only 1 MAP value every 1.7 * SAMPLING_RATE rows
+    if (rolling_sum == timeframe).sum() < timeframe * 30 or (
+        df["Solar8000/ART_MBP"].isna().sum()/len(df) < 0.7 * 1/(1.7*SAMPLING_RATE)
+    ):
         rename(ifile, join(join(env["dataFolder"], "unfit/"), basename(ifile)))
         verbose("File", ifile, "unfit")
         return False
@@ -208,21 +211,16 @@ def preprocessing(ifile: str, ofolder: str) -> bool:
 
     # Fill missing values from undersampled columns
     df.fillna(method="ffill", inplace=True)
-    df.fillna(method="bfill", inplace=True)
 
-    # Deleting outliers in ART and MAP
-    art_mean, art_std = df["SNUADC/ART"].mean(), df["SNUADC/ART"].std()
-    map_mean, map_std = df["Solar8000/ART_MBP"].mean(), df["Solar8000/ART_MBP"].std()
-    art_lower, art_upper = art_mean - 2 * art_std, art_mean + 2 * art_std
-    map_lower, map_upper = map_mean - 2 * map_std, map_mean + 2 * map_std
-    df = df[
-        (df["SNUADC/ART"] > art_lower)
-        & (df["SNUADC/ART"] < art_upper)
-        & (df["Solar8000/ART_MBP"] > map_lower)
-        & (df["Solar8000/ART_MBP"] < map_upper)
-    ]
+    # Deleting outliers using MAP
+    # Outliers are defined as measure where derivative of MAP is greater than 5mmHg
+    derivative_map = df["Solar8000/ART_MBP"].diff()
+    derivative_map.replace(0, None, inplace=True)
+    derivative_map.fillna(method="bfill", inplace=True)
+    mask_map = ~(derivative_map.abs() > 2)
+    df = df[mask_map & mask_art]
 
-    df.reset_index(inplace=True, drop=True)
+    # df.reset_index(inplace=True, drop=True)
 
     # Test for hypothension
     test_hypothension(basename(ifile)[:-6], df, ofolder)
