@@ -4,8 +4,6 @@ from os.path import exists, join, basename
 from sys import argv
 from concurrent.futures import ThreadPoolExecutor
 
-from statistics import mean, stdev
-
 import pandas as pd
 import vitaldb as vdb
 
@@ -272,6 +270,7 @@ def folder_preprocessing(ifolder: str, ofolder: str, force: bool = False) -> Non
 
 env_file = open("env.json", "r")
 env = json.load(env_file)
+env_file.close()
 
 TRACKS = env["tracks"]
 OPS = env["operations"]
