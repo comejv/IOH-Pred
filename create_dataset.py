@@ -193,7 +193,7 @@ def preprocessing(ifile: str, ofolder: str) -> bool:
     # If less than 30 minutes of valid data or less than 70% of MAP, case is unfit
     # Note : only 1 MAP value every 1.7 * SAMPLING_RATE rows
     if (rolling_sum == timeframe).sum() < timeframe * 30 or (
-        df["Solar8000/ART_MBP"].isna().sum()/len(df) < 0.7 * 1/(1.7*SAMPLING_RATE)
+        df["Solar8000/ART_MBP"].isna().sum() / len(df) < 0.7 * 1 / (1.7 * SAMPLING_RATE)
     ):
         rename(ifile, join(join(env["dataFolder"], "unfit/"), basename(ifile)))
         verbose("File", ifile, "unfit")
@@ -203,7 +203,7 @@ def preprocessing(ifile: str, ofolder: str) -> bool:
     # Delete rows after last minute with 80% of ART values above 40mmHg
     end_of_ag = (rolling_sum[rolling_sum >= 0.8 * timeframe]).iloc[
         ::-1
-    ].idxmax() + timeframe
+    ].idxmin() - timeframe
 
     df = df.iloc[start_of_ag : end_of_ag - start_of_ag]
 
@@ -215,8 +215,15 @@ def preprocessing(ifile: str, ofolder: str) -> bool:
     derivative_map = df["Solar8000/ART_MBP"].diff()
     derivative_map.replace(0, None, inplace=True)
     derivative_map.fillna(method="bfill", inplace=True)
-    mask_map = ~(derivative_map.abs() > 2)
-    df = df[mask_map & mask_art]
+    mask_map = (
+        ~(derivative_map.abs() > 3)
+        & ~(df["Solar8000/ART_MBP"] < 40)
+        & ~(df["Solar8000/ART_MBP"] > 150)
+    )
+
+    total_mask = mask_map & mask_art
+
+    df = df[total_mask]
 
     # df.reset_index(inplace=True, drop=True)
 
