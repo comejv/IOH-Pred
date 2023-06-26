@@ -22,7 +22,7 @@ The goal of this project is to train a machine learning model to predict IOH eve
 ## Roadmap
 
 - [x] Selecting, downloading and cleaning up data
-- [ ] [IN PROGRESS] Preprocessing the data 
+- [x] Preprocessing the data 
 - [ ] Training the model
 - [ ] Evaluating the model
 
@@ -52,13 +52,15 @@ python create_dataset.py -dl -pre
 
 ### Visualizing the preprocessed data
 
-You can visualize the data with the following command :
+You can visualize the data by running the following program :
 ```bash
 python plotting.py
 ```
 The resulting matplotlib figure will look like this :
-![Plotted cases](imgs/3476.png)
+![Plot of case 2202](imgs/2202.png)
 This view combines both the raw and preprocessed data.
 Gray zones are before and after anesthesia, so they are cropped in the processing.
 Arterial pressure is drawn in blue and overlayed with mean arterial pressure in orange.
 IOH events are marked with a red vertical line 1 minute wide.
+
+You can also find an interactive version of this figure in this [Google Colab notebook](https://colab.research.google.com/drive/12LOvNX076Kx2t6ikOKpBpGCG7m3t8fZH).
