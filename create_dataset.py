@@ -1,5 +1,5 @@
 import json
-from os import listdir, makedirs, remove, rename
+from os import listdir, makedirs, remove, rename, cpu_count
 from os.path import exists, join, basename
 from sys import argv
 from concurrent.futures import ThreadPoolExecutor
@@ -13,19 +13,27 @@ def verbose(*args, **kwargs):
         print(*args, **kwargs)
 
 
-def find_cases(track_names: list[str], ops: list[str]) -> list[int]:
+def find_cases(track_names: list[str], ops: list[str] = None) -> list[int]:
     df_cases = pd.read_csv("https://api.vitaldb.net/cases")
+    df_cases.to_csv("cases_preop.csv", index=True)
 
     # Cases selection
-    cases_tracks = vdb.find_cases(track_names)
-    op_set = (
-        pd.concat([df_cases[df_cases["opname"] == op]["caseid"] for op in ops], axis=1)
-        .stack()
-        .values
-    )
-    cases_ag = df_cases[df_cases["ane_type"] == "General"]["caseid"]
+    final_set = set(vdb.find_cases(track_names))
 
-    return list(set(cases_tracks) & set(op_set) & set(cases_ag))
+    if ops:
+        op_set = (
+            pd.concat(
+                [df_cases[df_cases["opname"] == op]["caseid"] for op in ops], axis=1
+            )
+            .stack()
+            .values
+        )
+        final_set &= set(op_set)
+
+    cases_ag = df_cases[df_cases["ane_type"] == "General"]["caseid"]
+    final_set &= set(cases_ag)
+
+    return list(final_set)
 
 
 def download_case(
@@ -73,7 +81,7 @@ def download_cases(
     makedirs(join(env["dataFolder"], "vital"), exist_ok=True)
     if max_cases:
         case_ids = case_ids[: min(len(case_ids), max_cases)]
-    with ThreadPoolExecutor(max_workers=10) as executor:
+    with ThreadPoolExecutor(max_workers=CORES + 3) as executor:
         for i, case_id in enumerate(case_ids):
             executor.submit(
                 download_case, case_id, track_names, interval, (i, len(case_ids))
@@ -150,7 +158,7 @@ def check_and_move(condition: bool, error_msg: str, src: str, dst: str) -> bool:
     return True
 
 
-def test_hypothension(case_name: str, case: pd.DataFrame, ofolder: str) -> None:
+def test_hypothension(case_name: str, case: pd.DataFrame, ofolder: str) -> bool:
     """Test for hypohetnsion in a case
 
     Args:
@@ -162,10 +170,9 @@ def test_hypothension(case_name: str, case: pd.DataFrame, ofolder: str) -> None:
     # idxs = case.index[mask.rolling(window=60 * SAMPLING_RATE, axis=0).apply(lambda x: x.all(), raw=True) == True]
     for i in range(len(mask) - 60 * SAMPLING_RATE):
         if all(mask[i : i + 60 * SAMPLING_RATE]):
-            case.to_pickle(join(ofolder, f"event/{case_name}.pkl"))
-            break
+            return True
     else:
-        case.to_pickle(join(ofolder, f"nonevent/{case_name}.pkl"))
+        return False
 
 
 def preprocessing(ifile: str, ofolder: str) -> bool:
@@ -201,11 +208,11 @@ def preprocessing(ifile: str, ofolder: str) -> bool:
     start_of_ag = rolling_sum[rolling_sum >= 0.9 * timeframe].idxmin()
 
     # Delete rows after last minute with 80% of ART values above 40mmHg
-    end_of_ag = (rolling_sum[rolling_sum >= 0.8 * timeframe]).iloc[
+    end_of_ag = (rolling_sum[rolling_sum >= 0.9 * timeframe]).iloc[
         ::-1
     ].idxmin() - timeframe
 
-    df = df.iloc[start_of_ag : end_of_ag - start_of_ag]
+    df = df.iloc[start_of_ag:end_of_ag]
 
     # Fill missing values from undersampled columns
     df.fillna(method="ffill", inplace=True)
@@ -216,21 +223,34 @@ def preprocessing(ifile: str, ofolder: str) -> bool:
     derivative_map.replace(0, None, inplace=True)
     derivative_map.fillna(method="bfill", inplace=True)
     mask_map = (
-        ~(derivative_map.abs() > 3)
-        & ~(df["Solar8000/ART_MBP"] < 40)
-        & ~(df["Solar8000/ART_MBP"] > 150)
+        (derivative_map.abs() < 3)
+        & (df["Solar8000/ART_MBP"] > 40)
+        & (df["Solar8000/ART_MBP"] < 150)
     )
 
     total_mask = mask_map & mask_art
 
     df = df[total_mask]
 
+    # Don't reset index to keep timestamps
     # df.reset_index(inplace=True, drop=True)
 
-    # Test for hypothension
-    test_hypothension(basename(ifile)[:-6], df, ofolder)
+    compression_set = {"method": "gzip", "compresslevel": 1, "mtime": 1}
 
-    verbose("File", ifile, "preprocessed and pickled")
+    # Test for hypothension
+    case_name = basename(ifile)[:-6]
+    if test_hypothension(case_name, df, ofolder):
+        df.to_pickle(
+            join(ofolder, f"event/{case_name}.gz"),
+            compression=compression_set,
+        )
+    else:
+        df.to_pickle(
+            join(ofolder, f"nonevent/{case_name}.gz"),
+            compression=compression_set,
+        )
+
+    verbose("File", ifile, "preprocessed pickled and compressed")
 
     return True
 
@@ -256,7 +276,8 @@ def folder_preprocessing(ifolder: str, ofolder: str, force: bool = False) -> Non
         if not file.endswith("vital"):
             continue
         ipath = join(ifolder, file)
-        ofilename = basename(ipath)[:-5] + "pkl"
+        case_id = basename(ipath)[:-6]
+        ofilename = case_id + ".gz"
 
         if (
             exists(join(evt_folder, ofilename))
@@ -269,7 +290,7 @@ def folder_preprocessing(ifolder: str, ofolder: str, force: bool = False) -> Non
 
     assert len(ipaths) == len(opaths), "Number of files does not match"
 
-    with ThreadPoolExecutor(max_workers=10) as executor:
+    with ThreadPoolExecutor(max_workers=CORES + 1) as executor:
         futures = list(executor.map(preprocessing, ipaths, opaths))
 
     verbose(f"Valid cases : {sum(futures)}/{len(ipaths)}")
@@ -284,10 +305,12 @@ OPS = env["operations"]
 SAMPLING_RATE = env["samplingRate"]
 VERBOSE = env["verbose"]
 
+CORES = cpu_count() if cpu_count() > 1 else 4
+
 if __name__ == "__main__":
     if "-dl" in argv:
         max_cases = int(input("Number of cases to download : "))
-        case_ids = find_cases(TRACKS, OPS)
+        case_ids = find_cases(TRACKS)
         download_cases(TRACKS, case_ids, max_cases=max_cases)
     if "-csv" in argv:
         folder_vital_to_csv(

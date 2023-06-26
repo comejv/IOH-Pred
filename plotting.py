@@ -26,9 +26,9 @@ while plotting:
         print("Case does not exist (missing vital file)")
         continue
 
-    if exists(f"{DATA_FOLDER}preprocessed/event/{caseid}.pkl"):
+    if exists(f"{DATA_FOLDER}preprocessed/event/{caseid}.gz"):
         event = "event"
-    elif exists(f"{DATA_FOLDER}preprocessed/nonevent/{caseid}.pkl"):
+    elif exists(f"{DATA_FOLDER}preprocessed/nonevent/{caseid}.gz"):
         event = "nonevent"
     else:
         print("Not pickled")
@@ -38,7 +38,7 @@ while plotting:
     vtf = VitalFile(f"{DATA_FOLDER}vital/{caseid}.vital")
     original = vtf.to_pandas(["SNUADC/ART", "Solar8000/ART_MBP"], 1 / 100)
 
-    processesed = pd.read_pickle(f"{DATA_FOLDER}preprocessed/{event}/{caseid}.pkl")
+    processesed = pd.read_pickle(f"{DATA_FOLDER}preprocessed/{event}/{caseid}.gz")
 
     if input("Stacked? (y/n)") == "y":
         original_pre_ag = original[original.index < processesed.index.min()]
