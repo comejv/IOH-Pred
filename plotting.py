@@ -36,7 +36,8 @@ while plotting:
 
     # read pickled dataframes
     vtf = VitalFile(f"{DATA_FOLDER}vital/{caseid}.vital")
-    original = vtf.to_pandas(["SNUADC/ART", "Solar8000/ART_MBP"], 1 / 100)
+    original = vtf.to_pandas(["SNUADC/ART", "Solar8000/ART_MBP", "Solar8000/ART_DBP", "Solar8000/ART_SBP"], 1 / SAMPLING_RATE)
+    original.ffill(inplace=True)
 
     processesed = pd.read_pickle(f"{DATA_FOLDER}preprocessed/{event}/{caseid}.gz")
 
@@ -60,8 +61,18 @@ while plotting:
 
         processesed.plot(
             ax=ax,
-            y=["SNUADC/ART", "Solar8000/ART_MBP"],
-            label=["Arterial pressure waveform", "Mean arterial pressure"],
+            y=[
+                "SNUADC/ART",
+                "Solar8000/ART_MBP",
+                "Solar8000/ART_DBP",
+                "Solar8000/ART_SBP",
+            ],
+            label=[
+                "Arterial pressure waveform",
+                "Mean arterial pressure",
+                "DBP",
+                "SBP",
+            ],
         )
 
         # Highlight all segments with hypotensive (IOH) events
@@ -85,24 +96,40 @@ while plotting:
         # Add the custom legend
         current_handles, current_labels = ax.get_legend_handles_labels()
         current_handles.append(hypotensive_event_patch)
-        ax.legend(handles=current_handles, labels=current_labels)
+        ax.legend(handles=current_handles, labels=current_labels, loc="upper right")
+        plt.xlabel("Time (ms)")
+        plt.ylabel("Arterial pressure (mmHg)")
         plt.ylim((-50, 200))
 
     else:
         fig, axs = plt.subplots(2, 1, sharex=True, figsize=(15, 6))
         original.plot(
             ax=axs[0],
-            y=["SNUADC/ART", "Solar8000/ART_MBP"],
+            y=[
+                "SNUADC/ART",
+                "Solar8000/ART_MBP",
+                "Solar8000/ART_DBP",
+                "Solar8000/ART_SBP",
+            ],
             title="Original",
-            label=["Arterial pressure waveform", "Mean arterial pressure"],
+            label=[
+                "Arterial pressure waveform",
+                "Mean arterial pressure",
+                "DBP",
+                "SBP",
+            ],
             ylim=(-50, 200),
+            xlabel="Time (ms)",
+            ylabel="Arterial pressure (mmHg)",
         )
         processesed.plot(
             ax=axs[1],
-            y=["SNUADC/ART", "Solar8000/ART_MBP"],
+            y=["SNUADC/ART", "Solar8000/ART_MBP", "Solar8000/ART_DBP", "Solar8000/ART_SBP"],
             title="Processed",
-            label=["Arterial pressure waveform", "Mean arterial pressure"],
+            label=["Arterial pressure waveform", "Mean arterial pressure", "DBP", "SBP"],
             ylim=(-50, 200),
+            xlabel="Time (ms)",
+            ylabel="Arterial pressure (mmHg)",
         )
 
     plt.show()
