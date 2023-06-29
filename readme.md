@@ -57,7 +57,7 @@ You can visualize the data by running the following program :
 python plotting.py
 ```
 The resulting matplotlib figure will look like this :
-![Plot of case 2202](imgs/2202.png)
+![Plot of case 2202](imgs/plot_2202.png)
 This view combines both the raw and preprocessed data.
 Gray zones are before and after anesthesia, so they are cropped in the processing.
 Arterial pressure is drawn in blue and overlayed with mean arterial pressure in orange.
