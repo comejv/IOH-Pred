@@ -9,11 +9,9 @@ __pycache__/
 # VSCode folder
 .vscode
 
-# Env
+# env and info files
 env.json
-
-# VitalDB cases
-data
+*.csv
 
 # Other papers
 extern
