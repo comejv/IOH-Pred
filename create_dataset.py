@@ -1,5 +1,4 @@
-import json
-from os import listdir, makedirs, remove, rename, cpu_count
+from os import listdir, makedirs, remove, rename
 from os.path import exists, join, basename
 from sys import argv
 from concurrent.futures import ThreadPoolExecutor
@@ -7,15 +6,13 @@ from concurrent.futures import ThreadPoolExecutor
 import pandas as pd
 import vitaldb as vdb
 
-
-def verbose(*args, **kwargs):
-    if VERBOSE:
-        print(*args, **kwargs)
+from utils import *
 
 
 def find_cases(track_names: list[str], ops: list[str] = None) -> list[int]:
-    df_cases = pd.read_csv("https://api.vitaldb.net/cases")
-    df_cases.to_csv("cases_preop.csv", index=True)
+    if not exists("cases_preop.csv"):
+        df_cases = pd.read_csv("https://api.vitaldb.net/cases")
+        df_cases.to_csv("cases_preop.csv", index=True)
 
     # Cases selection
     final_set = set(vdb.find_cases(track_names))
@@ -49,14 +46,14 @@ def download_case(
         track_names (list[str]): list of track names
         index (int, optional): Counter of the current case being downloaded. Defaults to None.
     """
-    if exists(join(env["dataFolder"], f"vital/{case_id}.vital")):
+    if exists(join(env.DATA_FOLDER, f"vital/{case_id}.vital")):
         verbose(f"Case {case_id} already exists")
         return
     try:
         case = vdb.VitalFile(case_id, track_names, interval)
         # Rename tracks
         # case.rename_tracks(mapping)
-        case.to_vital(opath=join(env["dataFolder"], f"vital/{case_id}.vital"))
+        case.to_vital(opath=join(env.DATA_FOLDER, f"vital/{case_id}.vital"))
         if index:
             verbose(f"Downloaded case {case_id} : {index[0]+1}/{index[1]}")
         else:
@@ -78,10 +75,10 @@ def download_cases(
         track_names (list): list of track names
         case_ids (list): list of case ids
     """
-    makedirs(join(env["dataFolder"], "vital"), exist_ok=True)
+    makedirs(join(env.DATA_FOLDER, "vital"), exist_ok=True)
     if max_cases:
         case_ids = case_ids[: min(len(case_ids), max_cases)]
-    with ThreadPoolExecutor(max_workers=CORES + 3) as executor:
+    with ThreadPoolExecutor(max_workers=env.CORES + 3) as executor:
         for i, case_id in enumerate(case_ids):
             executor.submit(
                 download_case, case_id, track_names, interval, (i, len(case_ids))
@@ -167,9 +164,9 @@ def test_hypothension(case_name: str, case: pd.DataFrame, ofolder: str) -> bool:
     # Hypotension event if more than 1 min of consecutive MAP below 65mmHg
     # MAP is mean average of SNUADC/ART, moving window of 2 seconds
     mask = case["Solar8000/ART_MBP"].lt(65)
-    # idxs = case.index[mask.rolling(window=60 * SAMPLING_RATE, axis=0).apply(lambda x: x.all(), raw=True) == True]
-    for i in range(len(mask) - 60 * SAMPLING_RATE):
-        if all(mask[i : i + 60 * SAMPLING_RATE]):
+    # idxs = case.index[mask.rolling(window=60 * env.SAMPLING_RATE, axis=0).apply(lambda x: x.all(), raw=True) == True]
+    for i in range(len(mask) - 60 * env.SAMPLING_RATE):
+        if all(mask[i : i + 60 * env.SAMPLING_RATE]):
             return True
     else:
         return False
@@ -187,22 +184,22 @@ def preprocessing(ifile: str, ofolder: str) -> bool:
     """
     vital = vdb.VitalFile(ifile)
     track_names = vital.get_track_names()
-    df = vital.to_pandas(track_names, 1 / SAMPLING_RATE)
+    df = vital.to_pandas(track_names, 1 / env.SAMPLING_RATE)
 
     # Delete rows with only nan values
     df.dropna(axis="index", subset=["SNUADC/ART"], inplace=True)
 
     # Number of rows in a minute
-    timeframe = SAMPLING_RATE * 60
+    timeframe = env.SAMPLING_RATE * 60
 
     mask_art = (df["SNUADC/ART"] > 30) & (df["SNUADC/ART"] < 160)
     rolling_sum = mask_art.rolling(window=timeframe).sum()
     # If less than 30 minutes of valid data or less than 70% of MAP, case is unfit
-    # Note : only 1 MAP value every 1.7 * SAMPLING_RATE rows
+    # Note : only 1 MAP value every 1.7 * env.SAMPLING_RATE rows
     if (rolling_sum == timeframe).sum() < timeframe * 30 or (
-        df["Solar8000/ART_MBP"].isna().sum() / len(df) < 0.7 * 1 / (1.7 * SAMPLING_RATE)
+        df["Solar8000/ART_MBP"].isna().sum() / len(df) < 0.7 * 1 / (1.7 * env.SAMPLING_RATE)
     ):
-        rename(ifile, join(join(env["dataFolder"], "unfit/"), basename(ifile)))
+        rename(ifile, join(join(env.DATA_FOLDER, "unfit/"), basename(ifile)))
         verbose("File", ifile, "unfit")
         return False
     start_of_ag = rolling_sum[rolling_sum >= 0.9 * timeframe].idxmin()
@@ -266,7 +263,7 @@ def folder_preprocessing(ifolder: str, ofolder: str, force: bool = False) -> Non
     makedirs(evt_folder, exist_ok=True)
     nonevt_folder = join(ofolder, "nonevent")
     makedirs(nonevt_folder, exist_ok=True)
-    makedirs(join(env["dataFolder"], "unfit"), exist_ok=True)
+    makedirs(join(env.DATA_FOLDER, "unfit"), exist_ok=True)
     futures = []
 
     ipaths = []
@@ -290,41 +287,30 @@ def folder_preprocessing(ifolder: str, ofolder: str, force: bool = False) -> Non
 
     assert len(ipaths) == len(opaths), "Number of files does not match"
 
-    with ThreadPoolExecutor(max_workers=CORES + 1) as executor:
+    with ThreadPoolExecutor(max_workers=env.CORES + 1) as executor:
         futures = list(executor.map(preprocessing, ipaths, opaths))
 
     verbose(f"Valid cases : {sum(futures)}/{len(ipaths)}")
 
 
-env_file = open("env.json", "r")
-env = json.load(env_file)
-env_file.close()
-
-TRACKS = env["tracks"]
-OPS = env["operations"]
-SAMPLING_RATE = env["samplingRate"]
-VERBOSE = env["verbose"]
-
-CORES = cpu_count() if cpu_count() > 1 else 4
-
 if __name__ == "__main__":
     if "-dl" in argv:
         max_cases = int(input("Number of cases to download : "))
-        case_ids = find_cases(TRACKS)
-        download_cases(TRACKS, case_ids, max_cases=max_cases)
+        case_ids = find_cases(env.TRACKS)
+        download_cases(env.TRACKS, case_ids, max_cases=max_cases)
     if "-csv" in argv:
         folder_vital_to_csv(
-            join(env["dataFolder"], "vital/"),
-            join(env["dataFolder"], "csv/"),
-            interval=SAMPLING_RATE,
+            join(env.DATA_FOLDER, "vital/"),
+            join(env.DATA_FOLDER, "csv/"),
+            interval=env.SAMPLING_RATE,
         )
     if "-pre" in argv:
         folder_preprocessing(
-            join(env["dataFolder"], "vital"), join(env["dataFolder"], "preprocessed")
+            join(env.DATA_FOLDER, "vital"), join(env.DATA_FOLDER, "preprocessed")
         )
     elif "-pref" in argv:
         folder_preprocessing(
-            join(env["dataFolder"], "vital"),
-            join(env["dataFolder"], "preprocessed"),
+            join(env.DATA_FOLDER, "vital"),
+            join(env.DATA_FOLDER, "preprocessed"),
             force=True,
         )

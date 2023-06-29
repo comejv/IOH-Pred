@@ -6,13 +6,9 @@ from vitaldb import VitalFile
 
 import json
 
-env_file = open("env.json", "r")
-env = json.load(env_file)
-env_file.close()
+from utils import *
 
-SAMPLING_RATE = env["samplingRate"]
-DATA_FOLDER = env["dataFolder"]
-timeframe = SAMPLING_RATE * 60
+timeframe = env.SAMPLING_RATE * 60
 plotting = True
 
 while plotting:
@@ -36,10 +32,10 @@ while plotting:
 
     # read pickled dataframes
     vtf = VitalFile(f"{DATA_FOLDER}vital/{caseid}.vital")
-    original = vtf.to_pandas(["SNUADC/ART", "Solar8000/ART_MBP", "Solar8000/ART_DBP", "Solar8000/ART_SBP"], 1 / SAMPLING_RATE)
+    original = vtf.to_pandas(["SNUADC/ART", "Solar8000/ART_MBP", "Solar8000/ART_DBP", "Solar8000/ART_SBP"], 1 / env.SAMPLING_RATE)
     original.ffill(inplace=True)
 
-    processesed = pd.read_pickle(f"{DATA_FOLDER}preprocessed/{event}/{caseid}.gz")
+    processesed = pd.read_pickle(f"{env.DATA_FOLDER}preprocessed/{event}/{caseid}.gz")
 
     if input("Stacked? (y/n)") == "y":
         original_pre_ag = original[original.index < processesed.index.min()]
