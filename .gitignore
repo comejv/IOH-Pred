@@ -20,3 +20,6 @@ extern
 
 # Tests
 test*
+
+# Latex
+latex
