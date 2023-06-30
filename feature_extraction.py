@@ -123,15 +123,18 @@ def multithreaded_transpose(folder: str, tf: int) -> pd.DataFrame:
 def label_events(input: str, output: str) -> None:
     df = pd.read_pickle(input)
 
-    # Check for each window if all MAP values are under 65
-    mask_grouped = (df["Solar8000/ART_MBP"] < 65).groupby("window").all()
+    # Drop windows where less than 98% of expected values
+    n_rows = df.groupby("window").size()
+    to_drop = n_rows[n_rows < env.SAMPLING_RATE * env.WINDOW_SIZE * 0.98].index
+    df.drop(to_drop, inplace=True)
 
     # Change to false where less than 1 minute of consecutive event
-    df = mask_grouped.reset_index(level='window')
-    df['block'] = df["Solar8000/ART_MBP"].ne(df['Solar8000/ART_MBP'].shift()).cumsum()    
-    df['counts'] = df.groupby('block')['Solar8000/ART_MBP'].transform('sum')
-    df['Solar8000/ART_MBP'] = df['Solar8000/ART_MBP'].mask(df['counts'] < 3, False)
-    df = df.set_index('window')['Solar8000/ART_MBP']
+    mask_grouped = (df["Solar8000/ART_MBP"] < 65).all()
+    df = mask_grouped.reset_index(level="window")
+    df["block"] = df["Solar8000/ART_MBP"].ne(df["Solar8000/ART_MBP"].shift()).cumsum()
+    df["counts"] = df.groupby("block")["Solar8000/ART_MBP"].transform("sum")
+    df["Solar8000/ART_MBP"] = df["Solar8000/ART_MBP"].mask(df["counts"] < 3, False)
+    df = df.set_index("window")["Solar8000/ART_MBP"]
 
     df.to_pickle(output)
 
@@ -144,14 +147,43 @@ def multithreaded_label_events(input: str, output: str) -> None:
         if file.endswith(".gz"):
             ifiles.append(join(input, file))
             ofiles.append(join(output, file[:-3] + "_labels.gz"))
-            
 
     with ThreadPoolExecutor(max_workers=env.CORES + 1) as executor:
         executor.map(label_events, ifiles, ofiles)
 
 
+def plot_labels(case: str):
+    multi_case_df = pd.read_pickle(
+        join(env.DATA_FOLDER, "ready", "cases", case + ".gz")
+    )
+    row_count = multi_case_df.groupby("window").size()
+    case_df = multi_case_df.reset_index().drop(columns=["window", "row"], axis=1)
+    labels_df = pd.read_pickle(
+        join(env.DATA_FOLDER, "ready", "labels", case + "_labels.gz")
+    )
+    fig, ax = plt.subplots(figsize=(15, 6))
+    case_df.plot(ax=ax, y=["SNUADC/ART", "Solar8000/ART_MBP"])
+    for i in labels_df[labels_df].index - 1:
+        if row_count.iloc[i] < env.SAMPLING_RATE * env.WINDOW_SIZE * 0.9:
+            continue
+        ax.axvspan(
+            i * row_count.iloc[i],
+            (i + 1) * row_count.iloc[i],
+            alpha=0.1,
+            color="red",
+        )
+    plt.show()
+
+
 if __name__ == "__main__":
+    if len(argv) < 2:
+        argv.append('-' + input("T, L or P? "))
     if "-T" in argv:
-        multithreaded_transpose(join(env.DATA_FOLDER, "transpose"), 20)
+        multithreaded_transpose(join(env.DATA_FOLDER, "transpose"), env.WINDOW_SIZE)
     if "-L" in argv:
-        multithreaded_label_events(input=join(env.DATA_FOLDER, "transpose"), output=join(env.DATA_FOLDER, "ready"))
+        multithreaded_label_events(
+            input=join(env.DATA_FOLDER, "ready/cases"),
+            output=join(env.DATA_FOLDER, "ready/labels"),
+        )
+    if "-P" in argv:
+        plot_labels(input("Which case? "))

@@ -18,20 +18,20 @@ while plotting:
     except ValueError:
         break
 
-    if not exists(f"{DATA_FOLDER}vital/{caseid}.vital"):
+    if not exists(f"{env.DATA_FOLDER}vital/{caseid}.vital"):
         print("Case does not exist (missing vital file)")
         continue
 
-    if exists(f"{DATA_FOLDER}preprocessed/event/{caseid}.gz"):
+    if exists(f"{env.DATA_FOLDER}preprocessed/event/{caseid}.gz"):
         event = "event"
-    elif exists(f"{DATA_FOLDER}preprocessed/nonevent/{caseid}.gz"):
+    elif exists(f"{env.DATA_FOLDER}preprocessed/nonevent/{caseid}.gz"):
         event = "nonevent"
     else:
         print("Not pickled")
         continue
 
     # read pickled dataframes
-    vtf = VitalFile(f"{DATA_FOLDER}vital/{caseid}.vital")
+    vtf = VitalFile(f"{env.DATA_FOLDER}vital/{caseid}.vital")
     original = vtf.to_pandas(["SNUADC/ART", "Solar8000/ART_MBP", "Solar8000/ART_DBP", "Solar8000/ART_SBP"], 1 / env.SAMPLING_RATE)
     original.ffill(inplace=True)
 
@@ -44,7 +44,7 @@ while plotting:
         # Find IOH
         mask = processesed["Solar8000/ART_MBP"].lt(65)
         idxs = processesed.index[
-            mask.rolling(window=60 * SAMPLING_RATE, axis=0).apply(
+            mask.rolling(window=60 * env.SAMPLING_RATE, axis=0).apply(
                 lambda x: x.all(), raw=True
             )
             == True
@@ -79,10 +79,10 @@ while plotting:
         if not idxs.empty:
             idx_prev = 0
             for i, idx in enumerate(idxs):
-                if idx - idx_prev >= 60 * SAMPLING_RATE:
+                if idx - idx_prev >= 60 * env.SAMPLING_RATE:
                     label = "Hypotensive event (1 minute wide)" if i == 0 else None
                     ax.axvspan(
-                        idx - 60 * SAMPLING_RATE,
+                        idx - 60 * env.SAMPLING_RATE,
                         idx,
                         color="red",
                         alpha=0.3,
@@ -102,17 +102,11 @@ while plotting:
         original.plot(
             ax=axs[0],
             y=[
-                "SNUADC/ART",
-                "Solar8000/ART_MBP",
-                "Solar8000/ART_DBP",
-                "Solar8000/ART_SBP",
+                "SNUADC/ART"
             ],
             title="Original",
             label=[
-                "Arterial pressure waveform",
-                "Mean arterial pressure",
-                "DBP",
-                "SBP",
+                "Arterial pressure waveform"
             ],
             ylim=(-50, 200),
             xlabel="Time (ms)",
