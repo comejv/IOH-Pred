@@ -96,11 +96,14 @@ def group_beat_unstack(filename, output):
     out.to_pickle(output, compression=compression_set)
 
 
-def group_beat_unstack_multithreaded(ifolder, ofolder):
+def group_beat_unstack_multithreaded(ifolder, ofolder, N):
     makedirs(ofolder, exist_ok=True)
     ifiles = []
     ofiles = []
+    n = 0
     for file in listdir(ifolder):
+        if n > N:
+            break
         if file.endswith(".gz"):
             ifiles.append(join(ifolder, file))
             ofiles.append(join(ofolder, file))
@@ -110,5 +113,5 @@ def group_beat_unstack_multithreaded(ifolder, ofolder):
 
 
 group_beat_unstack_multithreaded(
-    join(env.DATA_FOLDER, "preprocessed", "event"), join(env.DATA_FOLDER, "mirko", "event")
+    join(env.DATA_FOLDER, "preprocessed", "event"), join(env.DATA_FOLDER, "mirko", "event"), 100
 )
