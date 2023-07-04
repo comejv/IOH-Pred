@@ -54,7 +54,9 @@ def group_beat_unstack(filename, output):
     i, j = 0, 0
     if event_segments:
         while j < len(dia_valley) - 1:
-            while j < len(dia_valley) - 1 and dia_valley[j] < event_segments_shift[i][0]:
+            while (
+                j < len(dia_valley) - 1 and dia_valley[j] < event_segments_shift[i][0]
+            ):
                 beat_event.append(False)
                 j += 1
             while j < len(dia_valley) - 1 and dia_valley[j] < event_segments[i][1]:
@@ -116,10 +118,6 @@ def group_beat_unstack_multithreaded(ifolder, ofolder, N):
 
 
 if __name__ == "__main__":
-    group_beat_unstack(
-        join(env.DATA_FOLDER, "preprocessed", "nonevent", "369.gz"),
-        join(env.DATA_FOLDER, "mirko", "nonevent", "369.gz")
-    )
     group_beat_unstack_multithreaded(
         join(env.DATA_FOLDER, "preprocessed", "nonevent"),
         join(env.DATA_FOLDER, "mirko", "nonevent"),
