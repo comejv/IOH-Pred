@@ -119,7 +119,7 @@ def group_beat_unstack_multithreaded(ifolder, ofolder, N):
 
 if __name__ == "__main__":
     group_beat_unstack_multithreaded(
-        join(env.DATA_FOLDER, "preprocessed", "nonevent"),
-        join(env.DATA_FOLDER, "mirko", "nonevent"),
+        join(env.DATA_FOLDER, "preprocessed", "event"),
+        join(env.DATA_FOLDER, "mazen", "event"),
         50,
     )
