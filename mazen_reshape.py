@@ -52,18 +52,20 @@ def group_beat_unstack(filename, output):
 
     beat_event = []
     i, j = 0, 0
-    while j < len(dia_valley) - 1:
-        while j < len(dia_valley) - 1 and dia_valley[j] < event_segments_shift[i][0]:
-            beat_event.append(False)
-            j += 1
-        while j < len(dia_valley) - 1 and dia_valley[j] < event_segments[i][1]:
-            beat_event.append(True)
-            j += 1
-        i += 1
-        if i == len(event_segments):
-            break
-    beat_event += [False] + [False] * (len(dia_valley) - len(beat_event))
-
+    if event_segments:
+        while j < len(dia_valley) - 1:
+            while j < len(dia_valley) - 1 and dia_valley[j] < event_segments_shift[i][0]:
+                beat_event.append(False)
+                j += 1
+            while j < len(dia_valley) - 1 and dia_valley[j] < event_segments[i][1]:
+                beat_event.append(True)
+                j += 1
+            i += 1
+            if i == len(event_segments):
+                break
+        beat_event += [False] + [False] * (len(dia_valley) - len(beat_event))
+    else:
+        beat_event = [False] * (len(dia_valley) + 1)
     # fig, ax = plt.subplots(figsize=(15, 6))
     # ax.plot(df["Solar8000/ART_MBP"])
     # i = 0
@@ -102,16 +104,24 @@ def group_beat_unstack_multithreaded(ifolder, ofolder, N):
     ofiles = []
     n = 0
     for file in listdir(ifolder):
-        if n > N:
+        if n == N:
             break
         if file.endswith(".gz"):
             ifiles.append(join(ifolder, file))
             ofiles.append(join(ofolder, file))
+        n += 1
 
     with ThreadPoolExecutor(max_workers=env.CORES + 1) as executor:
         executor.map(group_beat_unstack, ifiles, ofiles)
 
 
-group_beat_unstack_multithreaded(
-    join(env.DATA_FOLDER, "preprocessed", "event"), join(env.DATA_FOLDER, "mirko", "event"), 100
-)
+if __name__ == "__main__":
+    group_beat_unstack(
+        join(env.DATA_FOLDER, "preprocessed", "nonevent", "369.gz"),
+        join(env.DATA_FOLDER, "mirko", "nonevent", "369.gz")
+    )
+    group_beat_unstack_multithreaded(
+        join(env.DATA_FOLDER, "preprocessed", "nonevent"),
+        join(env.DATA_FOLDER, "mirko", "nonevent"),
+        50,
+    )
