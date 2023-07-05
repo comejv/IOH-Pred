@@ -7,3 +7,4 @@ sktime
 numba
 pyyaml
 mlflow
+seaborn
