@@ -51,12 +51,13 @@ else:
 
 
 # LOAD TEST DATA
+test_case = 111
 X_test = (
-    pd.read_pickle(join(env.DATA_FOLDER, "ready", "cases", "118.gz"))
+    pd.read_pickle(join(env.DATA_FOLDER, "ready", "cases", f"{test_case}.gz"))
     .groupby("window")
     .filter(lambda group: len(group) == 2000)
 )
-Y_test = pd.read_pickle(join(env.DATA_FOLDER, "ready", "labels", "118_labels.gz"))
+Y_test = pd.read_pickle(join(env.DATA_FOLDER, "ready", "labels", f"{test_case}_labels.gz"))
 remaining_windows = X_test.index.get_level_values("window").unique()
 Y_test = Y_test[Y_test.index.isin(remaining_windows)]
 X_test_transform = minirocket_multi.transform(X_test)
@@ -65,7 +66,7 @@ X_test_scaled_transform = scaler.transform(X_test_transform)
 # PREDICTION
 Y_pred = classifier.predict(X_test_scaled_transform)
 Y_scores = classifier.decision_function(X_test_scaled_transform)
-Y_pred = Y_scores > -0.4
+Y_pred = Y_scores > 0
 cm = confusion_matrix(Y_test, Y_pred)
 cm_norm = cm.astype("float") / cm.sum(axis=1)[:, np.newaxis]
 
@@ -96,7 +97,7 @@ axtr.set_ylabel("True label")
 
 axb.plot(Y_test, color="blue")
 # axb.fill_between(Y_test.indices(), Y_test.values, color='blue', alpha=0.2)
-axb.plot(Y_pred, color="red")
+axb.plot(Y_test.index, Y_pred, color="red")
 # axb.fill_between(Y_pred.indices(), Y_pred.values, color='red', alpha=0.2)
 axb.set_title("Predictions")
 
