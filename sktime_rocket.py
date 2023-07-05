@@ -1,7 +1,7 @@
 from os import makedirs
 from os.path import join, exists
 import numpy as np
-from sklearn.linear_model import RidgeClassifierCV
+from sklearn.linear_model import RidgeClassifierCV, SGDClassifier
 from sklearn.preprocessing import StandardScaler
 import pandas as pd
 from sktime.transformations.panel.rocket import (
@@ -38,6 +38,8 @@ if not exists("models/model1/"):
     mlflow_sktime.save_model(scaler, "models/model1/scaler/")
 
     # TRAIN MODEL
+    # sgdclass = SGDClassifier()
+    # sgdclass.partial_fit()
     classifier = RidgeClassifierCV(alphas=np.logspace(-3, 3, 10))
     classifier.fit(X_train_scaled_transform, Y_train)
 
@@ -57,7 +59,9 @@ X_test = (
     .groupby("window")
     .filter(lambda group: len(group) == 2000)
 )
-Y_test = pd.read_pickle(join(env.DATA_FOLDER, "ready", "labels", f"{test_case}_labels.gz"))
+Y_test = pd.read_pickle(
+    join(env.DATA_FOLDER, "ready", "labels", f"{test_case}_labels.gz")
+)
 remaining_windows = X_test.index.get_level_values("window").unique()
 Y_test = Y_test[Y_test.index.isin(remaining_windows)]
 X_test_transform = minirocket_multi.transform(X_test)
