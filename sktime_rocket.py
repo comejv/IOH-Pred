@@ -30,12 +30,12 @@ if not exists("models/model1/"):
 
     minirocket_multi = MiniRocketMultivariate(n_jobs=4)
     minirocket_multi.fit(X_train)
-    mlflow_sktime.save_model(minirocket_multi, "models/rocket/")
+    mlflow_sktime.save_model(minirocket_multi, "models/model1/rocket/")
     X_train_transform = minirocket_multi.transform(X_train)
 
     scaler = StandardScaler(with_mean=False)
     X_train_scaled_transform = scaler.fit_transform(X_train_transform)
-    mlflow_sktime.save_model(scaler, "models/scaler/")
+    mlflow_sktime.save_model(scaler, "models/model1/scaler/")
 
     # TRAIN MODEL
     classifier = RidgeClassifierCV(alphas=np.logspace(-3, 3, 10))
@@ -43,11 +43,11 @@ if not exists("models/model1/"):
 
     # classifier.score(X_test_scaled_transform, Y_test)
     makedirs("models", exist_ok=True)
-    mlflow_sktime.save_model(classifier, "models/model1/")
+    mlflow_sktime.save_model(classifier, "models/model1/classifier/")
 else:
-    classifier = mlflow_sktime.load_model("models/model1/")
-    minirocket_multi = mlflow_sktime.load_model("models/rocket/")
-    scaler = mlflow_sktime.load_model("models/scaler/")
+    classifier = mlflow_sktime.load_model("models/model1/classifier/")
+    minirocket_multi = mlflow_sktime.load_model("models/model1/rocket/")
+    scaler = mlflow_sktime.load_model("models/model1/scaler")
 
 
 # LOAD TEST DATA
