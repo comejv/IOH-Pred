@@ -30,11 +30,12 @@ if not exists("models/model1/"):
 
     minirocket_multi = MiniRocketMultivariate(n_jobs=4)
     minirocket_multi.fit(X_train)
-    minirocket_multi.save("models/model1/estimator")
+    mlflow_sktime.save_model(minirocket_multi, "models/rocket/")
     X_train_transform = minirocket_multi.transform(X_train)
 
     scaler = StandardScaler(with_mean=False)
     X_train_scaled_transform = scaler.fit_transform(X_train_transform)
+    mlflow_sktime.save_model(scaler, "models/scaler/")
 
     # TRAIN MODEL
     classifier = RidgeClassifierCV(alphas=np.logspace(-3, 3, 10))
@@ -45,9 +46,8 @@ if not exists("models/model1/"):
     mlflow_sktime.save_model(classifier, "models/model1/")
 else:
     classifier = mlflow_sktime.load_model("models/model1/")
-    minirocket_multi = MiniRocketMultivariate()
-    minirocket_multi.load_from_path("models/model1.zip")
-    scaler = StandardScaler(with_mean=False)
+    minirocket_multi = mlflow_sktime.load_model("models/rocket/")
+    scaler = mlflow_sktime.load_model("models/scaler/")
 
 
 # LOAD TEST DATA
@@ -60,11 +60,12 @@ Y_test = pd.read_pickle(join(env.DATA_FOLDER, "ready", "labels", "118_labels.gz"
 remaining_windows = X_test.index.get_level_values("window").unique()
 Y_test = Y_test[Y_test.index.isin(remaining_windows)]
 X_test_transform = minirocket_multi.transform(X_test)
-X_test_scaled_transform = scaler.fit_transform(X_test_transform)
+X_test_scaled_transform = scaler.transform(X_test_transform)
 
 # PREDICTION
 Y_pred = classifier.predict(X_test_scaled_transform)
 Y_scores = classifier.decision_function(X_test_scaled_transform)
+Y_pred = Y_scores > -0.4
 cm = confusion_matrix(Y_test, Y_pred)
 cm_norm = cm.astype("float") / cm.sum(axis=1)[:, np.newaxis]
 
