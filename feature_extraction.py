@@ -156,22 +156,14 @@ def plot_labels(case: str):
     multi_case_df = pd.read_pickle(
         join(env.DATA_FOLDER, "ready", "cases", case + ".gz")
     )
-    row_count = multi_case_df.groupby("window").size()
     case_df = multi_case_df.reset_index().drop(columns=["window", "row"], axis=1)
     labels_df = pd.read_pickle(
         join(env.DATA_FOLDER, "ready", "labels", case + "_labels.gz")
     )
+    labels_shift = labels_df.shift(-30).fillna(False)
     fig, ax = plt.subplots(figsize=(15, 6))
-    case_df.plot(ax=ax, y=["SNUADC/ART", "Solar8000/ART_MBP"])
-    for i in labels_df[labels_df].index - 1:
-        if row_count.iloc[i] < env.SAMPLING_RATE * env.WINDOW_SIZE * 0.9:
-            continue
-        ax.axvspan(
-            i * row_count.iloc[i],
-            (i + 1) * row_count.iloc[i],
-            alpha=0.1,
-            color="red",
-        )
+    ax.plot(multi_case_df.index.to_list(), multi_case_df["Solar8000/ART_MBP"].values, color="blue")
+    ax.plot([group.index[0] for _, group in multi_case_df.groupby(level=0)], labels_shift.astype("int32").values, color="red")
     plt.show()
 
 
@@ -182,8 +174,8 @@ if __name__ == "__main__":
         multithreaded_transpose(join(env.DATA_FOLDER, "transpose"), env.WINDOW_SIZE)
     if "-L" in argv:
         multithreaded_label_events(
-            input=join(env.DATA_FOLDER, "ready/cases"),
-            output=join(env.DATA_FOLDER, "ready/labels"),
+            input=join(env.DATA_FOLDER, "ready", "cases"),
+            output=join(env.DATA_FOLDER, "ready", "labels"),
         )
     if "-P" in argv:
         plot_labels(input("Which case? "))
