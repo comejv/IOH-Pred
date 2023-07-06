@@ -80,7 +80,7 @@ def plot_comparison(df: pd.DataFrame) -> None:
     verbose("Done.")
 
 
-def transpose(file: str, tf: int, pickle: bool) -> pd.DataFrame | None:
+def transpose(ifile: str, ofile: str, tf: int) -> pd.DataFrame | None:
     """Transpose a dataframe into windows of size tf seconds
 
     Args:
@@ -90,11 +90,11 @@ def transpose(file: str, tf: int, pickle: bool) -> pd.DataFrame | None:
     Returns:
         pd.DataFrame: transposed dataframe
     """
-    df = pd.read_pickle(file)
+    df = pd.read_pickle(ifile)
     df["timestamp"] = pd.to_datetime(df.index * 10, unit="ms")
     grouper = pd.Grouper(key="timestamp", freq=f"{tf}s")
 
-    final_df = (
+    reshaped_df = (
         df.assign(
             window=(g := df.groupby(grouper)).ngroup().add(1), row=g.cumcount().add(1)
         )
@@ -102,51 +102,69 @@ def transpose(file: str, tf: int, pickle: bool) -> pd.DataFrame | None:
         .set_index(["window", "row"])
     )
 
-    verbose("Transposed dataframe", file)
-    if pickle:
-        final_df.to_pickle(file)
-    else:
-        return final_df
+    # Keep only windows with all data points
+    final_df = reshaped_df.groupby("window").filter(lambda group: len(group) == 2000)
+
+    verbose("Transposed dataframe", ofile)
+    final_df.to_pickle(ofile)
 
 
-def multithreaded_transpose(folder: str, tf: int) -> pd.DataFrame:
-    makedirs(folder, exist_ok=True)
-    files = []
-    for file in listdir(folder):
+def multithreaded_transpose(
+    ifolder: str, ofolder: str, tf: int, n_files: int = 0
+) -> pd.DataFrame:
+    makedirs(ifolder, exist_ok=True)
+    makedirs(ofolder, exist_ok=True)
+    ifiles = []
+    ofiles = []
+    n = 0
+    for file in listdir(ifolder):
         if file.endswith(".gz"):
-            files.append(join(folder, file))
+            ifiles.append(join(ifolder, file))
+            ofiles.append(join(ofolder, file))
+            n += 1
+            if n == n_files:
+                break
 
     with ThreadPoolExecutor(max_workers=4) as executor:
-        executor.map(transpose, files, [tf] * len(files), [True] * len(files))
+        executor.map(transpose, ifiles, ofiles, [tf] * len(ifiles))
 
 
 def label_events(input: str, output: str) -> None:
-    df = pd.read_pickle(input)
+    df_data = pd.read_pickle(input)
 
-    # Drop windows where less than 98% of expected values
-    n_rows = df.groupby("window").size()
-    to_drop = n_rows[n_rows < env.SAMPLING_RATE * env.WINDOW_SIZE * 0.98].index
-    df.drop(to_drop, inplace=True)
+    # Drop windows where values are missing
+    n_rows = df_data.groupby("window").size()
+    to_drop = n_rows[n_rows < env.SAMPLING_RATE * env.WINDOW_SIZE].index
+    df_data.drop(to_drop, inplace=True)
 
     # Change to false where less than 1 minute of consecutive event
-    mask_grouped = (df["Solar8000/ART_MBP"] < 65).all()
-    df = mask_grouped.reset_index(level="window")
-    df["block"] = df["Solar8000/ART_MBP"].ne(df["Solar8000/ART_MBP"].shift()).cumsum()
-    df["counts"] = df.groupby("block")["Solar8000/ART_MBP"].transform("sum")
-    df["Solar8000/ART_MBP"] = df["Solar8000/ART_MBP"].mask(df["counts"] < 3, False)
-    df = df.set_index("window")["Solar8000/ART_MBP"]
+    mask_grouped = (df_data["Solar8000/ART_MBP"] < 65).groupby("window").all()
+    df_labels = mask_grouped.reset_index(level="window")
+    df_labels["block"] = (
+        df_labels["Solar8000/ART_MBP"]
+        .ne(df_labels["Solar8000/ART_MBP"].shift())
+        .cumsum()
+    )
+    df_labels["counts"] = df_labels.groupby("block")["Solar8000/ART_MBP"].transform(
+        "sum"
+    )
+    df_labels["Solar8000/ART_MBP"] = df_labels["Solar8000/ART_MBP"].mask(
+        df_labels["counts"] < 3, False
+    )
+    df_labels = df_labels.set_index("window")["Solar8000/ART_MBP"]
+    # TODO : rename column
+    verbose("Labelled event", input)
+    df_labels.to_pickle(output)
 
-    df.to_pickle(output)
 
-
-def multithreaded_label_events(input: str, output: str) -> None:
-    makedirs(output, exist_ok=True)
+def multithreaded_label_events(ifolder: str, ofolder: str) -> None:
+    makedirs(ofolder, exist_ok=True)
     ifiles = []
     ofiles = []
-    for file in listdir(input):
+    for file in listdir(ifolder):
         if file.endswith(".gz"):
-            ifiles.append(join(input, file))
-            ofiles.append(join(output, file[:-3] + "_labels.gz"))
+            ifiles.append(join(ifolder, file))
+            ofiles.append(join(ofolder, file[:-3] + "_labels.gz"))
 
     with ThreadPoolExecutor(max_workers=env.CORES + 1) as executor:
         executor.map(label_events, ifiles, ofiles)
@@ -162,20 +180,34 @@ def plot_labels(case: str):
     )
     labels_shift = labels_df.shift(-30).fillna(False)
     fig, ax = plt.subplots(figsize=(15, 6))
-    ax.plot(multi_case_df.index.to_list(), multi_case_df["Solar8000/ART_MBP"].values, color="blue")
-    ax.plot([group.index[0] for _, group in multi_case_df.groupby(level=0)], labels_shift.astype("int32").values, color="red")
+    ax.plot(
+        multi_case_df.index.to_list(),
+        multi_case_df["Solar8000/ART_MBP"].values,
+        color="blue",
+    )
+    ax.plot(
+        [group.index[0] for _, group in multi_case_df.groupby(level=0)],
+        labels_shift.astype("int32").values,
+        color="red",
+    )
     plt.show()
 
 
 if __name__ == "__main__":
     if len(argv) < 2:
-        argv.append('-' + input("T, L or P? "))
+        argv.append("-" + input("T, L or P? "))
     if "-T" in argv:
-        multithreaded_transpose(join(env.DATA_FOLDER, "transpose"), env.WINDOW_SIZE)
+        n_files = input("How many files? 0 for all: ")
+        multithreaded_transpose(
+            ifolder=join(env.DATA_FOLDER, "preprocessed", "all"),
+            ofolder=join(env.DATA_FOLDER, "ready", "cases"),
+            tf=env.WINDOW_SIZE,
+            n_files=n_files
+        )
     if "-L" in argv:
         multithreaded_label_events(
-            input=join(env.DATA_FOLDER, "ready", "cases"),
-            output=join(env.DATA_FOLDER, "ready", "labels"),
+            ifolder=join(env.DATA_FOLDER, "ready", "cases"),
+            ofolder=join(env.DATA_FOLDER, "ready", "labels"),
         )
     if "-P" in argv:
         plot_labels(input("Which case? "))
