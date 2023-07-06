@@ -172,12 +172,12 @@ def test_hypothension(case_name: str, case: pd.DataFrame, ofolder: str) -> bool:
         return False
 
 
-def preprocessing(ifile: str, ofolder: str) -> bool:
+def preprocessing(ifile: str, ofile: str) -> bool:
     """Preprocessing and pickling of a vital file
 
     Args:
         ifile (str): path to the vital file
-        ofolder (str): path where to save the csv
+        ofile (str): path where to save the gzipped file
 
     Returns:
         bool: True if preprocessing was successful
@@ -192,12 +192,13 @@ def preprocessing(ifile: str, ofolder: str) -> bool:
     # Number of rows in a minute
     timeframe = env.SAMPLING_RATE * 60
 
-    mask_art = (df["SNUADC/ART"] > 30) & (df["SNUADC/ART"] < 160)
+    mask_art = df["SNUADC/ART"].between(30, 160)
     rolling_sum = mask_art.rolling(window=timeframe).sum()
     # If less than 30 minutes of valid data or less than 70% of MAP, case is unfit
     # Note : only 1 MAP value every 1.7 * env.SAMPLING_RATE rows
     if (rolling_sum == timeframe).sum() < timeframe * 30 or (
-        df["Solar8000/ART_MBP"].isna().sum() / len(df) < 0.7 * 1 / (1.7 * env.SAMPLING_RATE)
+        df["Solar8000/ART_MBP"].isna().sum() / len(df)
+        < 0.7 * 1 / (1.7 * env.SAMPLING_RATE)
     ):
         rename(ifile, join(join(env.DATA_FOLDER, "unfit/"), basename(ifile)))
         verbose("File", ifile, "unfit")
@@ -225,7 +226,7 @@ def preprocessing(ifile: str, ofolder: str) -> bool:
         & (df["Solar8000/ART_MBP"] < 150)
     )
 
-    total_mask = mask_map & mask_art
+    total_mask = mask_map & df["SNUADC/ART"].between(30, 160)
 
     df = df[total_mask]
 
@@ -236,18 +237,22 @@ def preprocessing(ifile: str, ofolder: str) -> bool:
 
     # Test for hypothension
     case_name = basename(ifile)[:-6]
-    if test_hypothension(case_name, df, ofolder):
-        df.to_pickle(
-            join(ofolder, f"event/{case_name}.gz"),
-            compression=compression_set,
-        )
-    else:
-        df.to_pickle(
-            join(ofolder, f"nonevent/{case_name}.gz"),
-            compression=compression_set,
-        )
+    # if test_hypothension(case_name, df, ofolder):
+    #     df.to_pickle(
+    #         join(ofolder, f"event/{case_name}.gz"),
+    #         compression=compression_set,
+    #     )
+    # else:
+    #     df.to_pickle(
+    #         join(ofolder, f"nonevent/{case_name}.gz"),
+    #         compression=compression_set,
+    #     )
+    df.to_pickle(
+        path=ofile,
+        compression=compression_set,
+    )
 
-    verbose("File", ifile, "preprocessed pickled and compressed")
+    verbose("File", basename(ifile), "preprocessed to", ofile)
 
     return True
 
@@ -259,10 +264,7 @@ def folder_preprocessing(ifolder: str, ofolder: str, force: bool = False) -> Non
         ifolder (str): path to the folder containing the vital files
         ofolder (str): path where to save the vital files that don't pass QC
     """
-    evt_folder = join(ofolder, "event")
-    makedirs(evt_folder, exist_ok=True)
-    nonevt_folder = join(ofolder, "nonevent")
-    makedirs(nonevt_folder, exist_ok=True)
+    makedirs(ofolder, exist_ok=True)
     makedirs(join(env.DATA_FOLDER, "unfit"), exist_ok=True)
     futures = []
 
@@ -274,20 +276,17 @@ def folder_preprocessing(ifolder: str, ofolder: str, force: bool = False) -> Non
             continue
         ipath = join(ifolder, file)
         case_id = basename(ipath)[:-6]
-        ofilename = case_id + ".gz"
+        opath = join(ofolder, case_id + ".gz")
 
-        if (
-            exists(join(evt_folder, ofilename))
-            or exists(join(nonevt_folder, ofilename))
-        ) and not force:
-            verbose("File", ofilename, "already preprocessed, skipping")
+        if exists(opath) and not force:
+            verbose("Case", case_id, "already preprocessed, skipping")
             continue
         ipaths.append(ipath)
-        opaths.append(ofolder)
+        opaths.append(opath)
 
     assert len(ipaths) == len(opaths), "Number of files does not match"
 
-    with ThreadPoolExecutor(max_workers=env.CORES + 1) as executor:
+    with ThreadPoolExecutor(max_workers=env.CORES - 1) as executor:
         futures = list(executor.map(preprocessing, ipaths, opaths))
 
     verbose(f"Valid cases : {sum(futures)}/{len(ipaths)}")
@@ -306,11 +305,12 @@ if __name__ == "__main__":
         )
     if "-pre" in argv:
         folder_preprocessing(
-            join(env.DATA_FOLDER, "vital"), join(env.DATA_FOLDER, "preprocessed")
+            ifolder=join(env.DATA_FOLDER, "vital"),
+            ofolder=join(env.DATA_FOLDER, "preprocessed", "all"),
         )
     elif "-pref" in argv:
         folder_preprocessing(
             join(env.DATA_FOLDER, "vital"),
-            join(env.DATA_FOLDER, "preprocessed"),
+            join(env.DATA_FOLDER, "preprocessed", "all"),
             force=True,
         )
