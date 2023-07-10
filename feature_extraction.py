@@ -132,10 +132,10 @@ def multithreaded_transpose(
 def label_events(input: str, output: str) -> None:
     df_data = pd.read_pickle(input)
 
-    # Drop windows where values are missing
-    n_rows = df_data.groupby("window").size()
-    to_drop = n_rows[n_rows < env.SAMPLING_RATE * env.WINDOW_SIZE].index
-    df_data.drop(to_drop, inplace=True)
+    # # Drop windows where values are missing (done in transpose function)
+    # n_rows = df_data.groupby("window").size()
+    # to_drop = n_rows[n_rows < env.SAMPLING_RATE * env.WINDOW_SIZE].index
+    # df_data.drop(to_drop, inplace=True)
 
     # Change to false where less than 1 minute of consecutive event
     mask_grouped = (df_data["Solar8000/ART_MBP"] < 65).groupby("window").all()
@@ -152,7 +152,7 @@ def label_events(input: str, output: str) -> None:
         df_labels["counts"] < 3, False
     )
     df_labels = df_labels.set_index("window")["Solar8000/ART_MBP"]
-    # TODO : rename column
+
     verbose("Labelled event", input)
     df_labels.to_pickle(output)
 
