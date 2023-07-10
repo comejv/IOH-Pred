@@ -21,39 +21,48 @@ from sktime.datatypes import check_raise
 from sktime.transformations.panel.rocket import MiniRocketMultivariate
 from sktime.utils import mlflow_sktime
 from progress.bar import ChargingBar
+from progress.spinner import Spinner
 
 
-# %% TRAIN
+def train_sgd(
+    ifolder,
+    epochs=4,
+    n_training_cases=-1,
+    init_case=111,
+    rocket_threads=-1,
+    fit_each=True,
+    expected_type="pd-multiindex",
+) -> (Pipeline, SGDClassifier):
+    """Train the SGD classifier on the given training data after minirocket transformations.
 
-model = input("Model name: ")
+    Args:
+        ifolder (_type_): Path to a folder containing `train` and `labels` subfolder.
+        epochs (int, optional): Number of epochs to train for. Defaults to 4.
+        n_training_cases (int, optional): Number of training cases to use. Defaults to -1 for all cases.
+        init_case (int, optional): Initial case to fit rocket on. Defaults to 111.
+        rocket_threads (int, optional): Number of threads to use for minirocket. Defaults to -1 for all available.
+        expected_type (str, optional): Type of input data for `sktime.datatypes.check_raise`. Defaults to "pd-multiindex".
 
-if not exists(f"models/model_{model}/"):
-    verbose("No model found, creating one now...")
+    Returns:
+        (Pipeline, SGDClassifier): Pipeline with minirocket and scaler, and trained classifier.
+    """
     verbose("Loading training data")
     # LOAD TRAIN DATA
-    X_train = (
-        pd.read_pickle(join(env.DATA_FOLDER, "ready", "train", "111.gz"))
-        # .groupby("window")
-        # .filter(lambda group: len(group) == 2000)
-    )
-    Y_train = pd.read_pickle(join(env.DATA_FOLDER, "ready", "labels", "111_labels.gz"))
-    # remaining_windows = X_train.index.get_level_values("window").unique()
-    # Y_train = Y_train[Y_train.index.isin(remaining_windows)]
+    X_train = pd.read_pickle(join(ifolder, "train", f"{init_case}.gz"))
+    Y_train = pd.read_pickle(join(ifolder, "labels", f"{init_case}_labels.gz"))
 
-    try:
-        check_raise(X_train, mtype="pd-multiindex")
-    except Exception as e:
-        print("Training data has the wrong type (expected multi-index dataframe).")
-        raise e
+    check_raise(X_train, mtype=expected_type)
 
     pipe = Pipeline(
         [
-            ("rocket", MiniRocketMultivariate(n_jobs=4)),
+            ("rocket", MiniRocketMultivariate(n_jobs=rocket_threads)),
             ("scaler", StandardScaler()),
         ]
     )
-    verbose("Fitting pipeline...")
-    pipe.fit(X_train)
+
+    if not fit_each:
+        verbose("Fitting pipeline")
+        pipe.fit(X_train)
 
     # TRAIN MODEL
     class_weights = compute_class_weight(
@@ -63,26 +72,42 @@ if not exists(f"models/model_{model}/"):
         class_weight={False: class_weights[0], True: class_weights[1]}
     )
 
-    epochs = int(input("Number of epochs: "))
-    files = listdir(join(env.DATA_FOLDER, "ready", "train"))
+    files = listdir(join(ifolder, "train"))
     verbose("Starting training...")
     for epoch in range(epochs):
+        n = 0
         for file in ChargingBar(
             f"Fitting epoch {epoch+1}/{epochs}", suffix="%(percent).1f%% - %(eta)ds"
         ).iter(files):
             if file.endswith(".gz"):
-                X_train = pd.read_pickle(join(env.DATA_FOLDER, "ready", "train", file))
+                n += 1
+                X_train = pd.read_pickle(join(ifolder, "train", file))
                 Y_train = pd.read_pickle(
-                    join(env.DATA_FOLDER, "ready", "labels", file[:-3] + "_labels.gz")
+                    join(ifolder, "labels", file[:-3] + "_labels.gz")
                 )
 
-                check_raise(X_train, mtype="pd-multiindex")
+                check_raise(X_train, mtype=expected_type)
 
-                X_train_transform = pipe.transform(X_train)
+                if fit_each:
+                    X_train_transform = pipe.fit_transform(X_train)
+                else:
+                    X_train_transform = pipe.transform(X_train)
 
                 classifier.partial_fit(
                     X_train_transform, Y_train, classes=[False, True]
                 )
+                if n == n_training_cases:
+                    break
+    return pipe, classifier
+
+# %% TRAIN
+
+model = input("Model name: ")
+
+if not exists(f"models/model_{model}/"):
+    verbose("No model found, creating one now...")
+
+    pipe, classifier = train_sgd(join(env.DATA_FOLDER, "ready"), fit_each=False, epochs=1)
 
     mlflow_sktime.save_model(pipe, f"models/model_{model}/pipeline/")
     mlflow_sktime.save_model(classifier, f"models/model_{model}/classifier/")
@@ -96,30 +121,8 @@ else:
 
 # %% TEST
 
-
-def test_model(x_test_path: str, y_test_path: str) -> tuple[pd.DataFrame, np.ndarray]:
-    """Run the model on the test data and return the predictions.
-
-    Args:
-        x_test_path (str): Path to the test data
-
-    Returns:
-        tuple[pd.DataFrame, np.ndarray]: Labels and predictions
-    """
-    case = basename(x_test_path)
-    verbose("Loading test data...")
-    X_test = pd.read_pickle(x_test_path)
-    Y_test = pd.read_pickle(y_test_path)
-
-    verbose(f"Transforming {case} with pipeline...")
-    X_test_transform = pipe.transform(X_test)
-
-    verbose(f"Classifying {case}...")
-    return Y_test, classifier.decision_function(X_test_transform)
-
-
-def multithread_test_model(
-    ifolder: str, n_files: int = 5
+def test_model(
+    ifolder: str, n_files: int = 5, fit_each: bool = True
 ) -> tuple[pd.DataFrame, np.ndarray]:
     """Run the model on the test data and return the predictions.
     ifolder is path to a folder where there are two subfolders :
@@ -132,20 +135,31 @@ def multithread_test_model(
     Returns:
         tuple[pd.DataFrame, np.ndarray]: Labels and predictions
     """
-    xfiles = []
-    yfiles = []
+    Y_test_l = []
+    Y_scores_l = []
     n = 0
     for file in listdir(join(ifolder, "test")):
         if file.endswith(".gz"):
-            xfiles.append(join(ifolder, "test", file))
-            yfiles.append(join(ifolder, "labels", file[:-3] + "_labels.gz"))
+            xpath = join(ifolder, "test", file)
+            ypath = join(ifolder, "labels", file[:-3] + "_labels.gz")
+            case = basename(xpath)
+            verbose("Loading test data...")
+            X_test = pd.read_pickle(xpath)
+            Y_test = pd.read_pickle(ypath)
+
+            verbose(f"Transforming {case} with pipeline")
+            if fit_each:
+                X_test_transform = pipe.fit_transform(X_test)
+            else:
+                X_test_transform = pipe.transform(X_test)
+
+            verbose(f"Classifying {case}...")
+            Y_test_l.append(Y_test)
+            Y_scores_l.append(classifier.decision_function(X_test_transform))
             n += 1
             if n == n_files:
                 break
 
-    with ThreadPoolExecutor(max_workers=env.CORES) as executor:
-        futures = executor.map(test_model, xfiles, yfiles)
-    Y_test_l, Y_scores_l = zip(*futures)
     Y_test = pd.concat(Y_test_l).reset_index(drop=True)
     Y_scores = np.concatenate(Y_scores_l)
 
@@ -153,7 +167,10 @@ def multithread_test_model(
 
 
 n_test = int(input("Number of test files: "))
-Y_test, Y_scores = multithread_test_model(join(env.DATA_FOLDER, "ready"), n_files=n_test)
+Y_test, Y_scores = test_model(
+    join(env.DATA_FOLDER, "ready"), n_files=n_test, fit_each=False
+)
+
 
 verbose("Computing model performances...")
 # ROC Curve
@@ -280,6 +297,8 @@ ax3.legend(
     handles=current_handles.append(true_positive_zone),
     labels=current_labels.append("True positive"),
 )
-ax3.set_title(f"Predictions with gmean threshold : {Y_test.index[-1] * 20 / 3600:.2f}hrs")
+ax3.set_title(
+    f"Predictions with gmean threshold : {Y_test.index[-1] * 20 / 3600:.2f}hrs"
+)
 
 plt.show()
