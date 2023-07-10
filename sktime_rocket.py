@@ -1,6 +1,10 @@
+# %% IMPORT
+from utils import *
+
+verbose("Importing required modules...")
 from concurrent.futures import ThreadPoolExecutor
 from os import listdir, makedirs
-from os.path import exists, join
+from os.path import basename, exists, join
 
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
@@ -8,23 +12,27 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from matplotlib.gridspec import GridSpec
-from sklearn.linear_model import RidgeClassifierCV, SGDClassifier
-from sklearn.metrics import auc, confusion_matrix, f1_score, roc_curve
+from sklearn.linear_model import SGDClassifier  # RidgeClassifierCV
 from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import Pipeline
+from sklearn.metrics import auc, confusion_matrix, f1_score, roc_curve
+from sklearn.utils.class_weight import compute_class_weight
 from sktime.datatypes import check_raise
 from sktime.transformations.panel.rocket import MiniRocketMultivariate
 from sktime.utils import mlflow_sktime
+from progress.bar import ChargingBar
 
-from utils import *
+
+# %% TRAIN
 
 model = input("Model name: ")
 
-if not exists(f"models/model{model}/"):
+if not exists(f"models/model_{model}/"):
     verbose("No model found, creating one now...")
     verbose("Loading training data")
     # LOAD TRAIN DATA
     X_train = (
-        pd.read_pickle(join(env.DATA_FOLDER, "ready", "cases", "111.gz"))
+        pd.read_pickle(join(env.DATA_FOLDER, "ready", "train", "111.gz"))
         # .groupby("window")
         # .filter(lambda group: len(group) == 2000)
     )
@@ -38,34 +46,55 @@ if not exists(f"models/model{model}/"):
         print("Training data has the wrong type (expected multi-index dataframe).")
         raise e
 
-    verbose("Fitting rocket transformer...")
-    minirocket_multi = MiniRocketMultivariate(n_jobs=4)
-    minirocket_multi.fit(X_train)
-    mlflow_sktime.save_model(minirocket_multi, f"models/model{model}/rocket/")
-    verbose("Transforming data...")
-    X_train_transform = minirocket_multi.transform(X_train)
-
-    scaler = StandardScaler(with_mean=False)
-    X_train_scaled_transform = scaler.fit_transform(X_train_transform)
-    mlflow_sktime.save_model(scaler, f"models/model{model}/scaler/")
+    pipe = Pipeline(
+        [
+            ("rocket", MiniRocketMultivariate(n_jobs=4)),
+            ("scaler", StandardScaler()),
+        ]
+    )
+    verbose("Fitting pipeline...")
+    pipe.fit(X_train)
 
     # TRAIN MODEL
-    verbose("Training model...")
-    # sgdclass = SGDClassifier()
-    # sgdclass.partial_fit()
-    classifier = RidgeClassifierCV(alphas=np.logspace(-3, 3, 10))
-    classifier.fit(X_train_scaled_transform, Y_train)
+    class_weights = compute_class_weight(
+        class_weight="balanced", classes=[False, True], y=Y_train
+    )
+    classifier = SGDClassifier(
+        class_weight={False: class_weights[0], True: class_weights[1]}
+    )
 
-    # classifier.score(X_test_scaled_transform, Y_test)
-    makedirs("models", exist_ok=True)
-    mlflow_sktime.save_model(classifier, f"models/model{model}/classifier/")
-    verbose("Done. Model, rocket and scaler saved in models folder.")
+    epochs = int(input("Number of epochs: "))
+    files = listdir(join(env.DATA_FOLDER, "ready", "train"))
+    verbose("Starting training...")
+    for epoch in range(epochs):
+        for file in ChargingBar(
+            f"Fitting epoch {epoch+1}/{epochs}", suffix="%(percent).1f%% - %(eta)ds"
+        ).iter(files):
+            if file.endswith(".gz"):
+                X_train = pd.read_pickle(join(env.DATA_FOLDER, "ready", "train", file))
+                Y_train = pd.read_pickle(
+                    join(env.DATA_FOLDER, "ready", "labels", file[:-3] + "_labels.gz")
+                )
+
+                check_raise(X_train, mtype="pd-multiindex")
+
+                X_train_transform = pipe.transform(X_train)
+
+                classifier.partial_fit(
+                    X_train_transform, Y_train, classes=[False, True]
+                )
+
+    mlflow_sktime.save_model(pipe, f"models/model_{model}/pipeline/")
+    mlflow_sktime.save_model(classifier, f"models/model_{model}/classifier/")
 else:
+    verbose("Loading pipeline from models folder...")
+    pipe = mlflow_sktime.load_model(f"models/model_{model}/pipeline/")
     verbose("Loading model from models folder...")
-    classifier = mlflow_sktime.load_model(f"models/model{model}/classifier/")
-    minirocket_multi = mlflow_sktime.load_model(f"models/model{model}/rocket/")
-    scaler = mlflow_sktime.load_model(f"models/model{model}/scaler")
+    classifier = mlflow_sktime.load_model(f"models/model_{model}/classifier/")
     verbose("Done.")
+
+
+# %% TEST
 
 
 def test_model(x_test_path: str, y_test_path: str) -> tuple[pd.DataFrame, np.ndarray]:
@@ -77,16 +106,16 @@ def test_model(x_test_path: str, y_test_path: str) -> tuple[pd.DataFrame, np.nda
     Returns:
         tuple[pd.DataFrame, np.ndarray]: Labels and predictions
     """
+    case = basename(x_test_path)
     verbose("Loading test data...")
     X_test = pd.read_pickle(x_test_path)
     Y_test = pd.read_pickle(y_test_path)
 
-    verbose("Transforming test data with rocket...")
-    X_test_transform = minirocket_multi.transform(X_test)
-    X_test_scaled_transform = scaler.transform(X_test_transform)
+    verbose(f"Transforming {case} with pipeline...")
+    X_test_transform = pipe.transform(X_test)
 
-    verbose("Classifying test data...")
-    return Y_test, classifier.decision_function(X_test_scaled_transform)
+    verbose(f"Classifying {case}...")
+    return Y_test, classifier.decision_function(X_test_transform)
 
 
 def multithread_test_model(
@@ -106,9 +135,9 @@ def multithread_test_model(
     xfiles = []
     yfiles = []
     n = 0
-    for file in listdir(join(ifolder, "cases")):
+    for file in listdir(join(ifolder, "test")):
         if file.endswith(".gz"):
-            xfiles.append(join(ifolder, "cases", file))
+            xfiles.append(join(ifolder, "test", file))
             yfiles.append(join(ifolder, "labels", file[:-3] + "_labels.gz"))
             n += 1
             if n == n_files:
@@ -123,8 +152,10 @@ def multithread_test_model(
     return Y_test, Y_scores
 
 
-Y_test, Y_scores = multithread_test_model(join(env.DATA_FOLDER, "ready"))
+n_test = int(input("Number of test files: "))
+Y_test, Y_scores = multithread_test_model(join(env.DATA_FOLDER, "ready"), n_files=n_test)
 
+verbose("Computing model performances...")
 # ROC Curve
 fpr, tpr, auc_thresholds = roc_curve(Y_test, Y_scores)
 roc_auc = auc(fpr, tpr)
@@ -135,7 +166,8 @@ index = np.argmax(gmean)
 gmean_threshold = auc_thresholds[index]
 Y_pred_gmean = Y_scores > gmean_threshold
 # f1 score
-f1_thresholds = np.arange(auc_thresholds[-1], auc_thresholds[0], 0.01)
+# f1_thresholds = np.arange(auc_thresholds[-1], auc_thresholds[0], 0.01)
+f1_thresholds = auc_thresholds
 f1_scores = []
 for t in f1_thresholds:
     y_pred = Y_scores > t
@@ -161,7 +193,7 @@ if cm.shape != (2, 2):
     )
 
 # %% PLOT
-verbose("Plotting.")
+verbose("Plotting test results.")
 # Create dataframe for the confusion matrices
 df_cm = pd.DataFrame(cm, index=[False, True], columns=[False, True])
 df_cm_norm = pd.DataFrame(cm_norm, index=[False, True], columns=[False, True])
@@ -198,29 +230,40 @@ ax2l.legend(loc="lower right")
 
 # f1 score and gmean by threshold
 ax2r.plot(f1_thresholds, f1_scores, label="F1 score", color="green")
-ax2r.plot(auc_thresholds, gmean, label="Gmean", color="blue")
 ax2r.axvline(
     x=f1_threshold,
     color="lightgreen",
-    label="Best f1 threshold (%.2f)" % f1_threshold,
+    label="Best f1 threshold %.2f : %.2f" % (f1_threshold, max(f1_scores)),
 )
+ax2r.plot(auc_thresholds, gmean, label="Gmean", color="blue")
 ax2r.axvline(
     x=gmean_threshold,
     color="lightblue",
-    label="Best gmean threshold (%.2f)" % gmean_threshold,
+    label="Best gmean threshold %.2f : %.2f" % (gmean_threshold, max(gmean)),
 )
 ax2r.legend()
 ax2r.set_xlabel("Threshold")
 ax2r.set_ylabel("F1 score and gmean")
-ax2r.set_xlim([-2, 2])
+ax2r.set_xlim(
+    [
+        -1.5 * abs(min(f1_threshold, gmean_threshold)),
+        1.5 * abs(max(f1_threshold, gmean_threshold)),
+    ]
+)
 ax2r.set_title("F1 score and gmean by threshold")
 
 # Plot predictions with gmean threshold
 Y_test = Y_test.astype(int)
 ax3.scatter(
     Y_test.index,
+    Y_test,
+    color="navy",
+    label="True labels",
+)
+ax3.scatter(
+    Y_test.index,
     Y_pred_gmean,
-    color="blue",
+    color="cyan",
     label="Predictions with best gmean threshold",
 )
 ax3.fill_between(
@@ -237,8 +280,6 @@ ax3.legend(
     handles=current_handles.append(true_positive_zone),
     labels=current_labels.append("True positive"),
 )
-ax3.set_title("Predictions with gmean threshold")
+ax3.set_title(f"Predictions with gmean threshold : {Y_test.index[-1] * 20 / 3600:.2f}hrs")
 
 plt.show()
-
-# %%
