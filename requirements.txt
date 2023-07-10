@@ -8,3 +8,4 @@ numba
 pyyaml
 mlflow
 seaborn
+progress
