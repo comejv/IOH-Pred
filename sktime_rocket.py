@@ -121,10 +121,22 @@ else:
 
 
 # %% TEST
+def test_model(xpath: str, ypath: str, fit_each: bool = False, bar: ChargingBar = None) -> tuple[pd.DataFrame, np.ndarray]:
+    case = basename(xpath)
+    X_test = pd.read_pickle(xpath)
+    Y_test = pd.read_pickle(ypath)
 
+    if fit_each:
+        X_test_transform = pipe.fit_transform(X_test)
+    else:
+        X_test_transform = pipe.transform(X_test)
 
-def test_model(
-    ifolder: str, n_files: int = 5, fit_each: bool = True
+    if bar : bar.next()
+
+    return Y_test, classifier.decision_function(X_test_transform)
+
+def test_model_multi(
+    ifolder: str, n_files: int = 5, fit_each: bool = False
 ) -> tuple[pd.DataFrame, np.ndarray]:
     """Run the model on the test data and return the predictions.
     ifolder is path to a folder where there are two subfolders :
@@ -139,31 +151,26 @@ def test_model(
     Returns:
         tuple[pd.DataFrame, np.ndarray]: Labels and predictions
     """
-    Y_test_l = []
-    Y_scores_l = []
+    xpaths = []
+    ypaths = []
     n = 0
-    with ChargingBar("Testing", max=n_files, suffix="%(percent).1f%% - ETA %(eta)ds") as bar:
-        for file in listdir(join(ifolder, "test")):
-            if file.endswith(".gz"):
-                xpath = join(ifolder, "test", file)
-                ypath = join(ifolder, "labels", file[:-3] + "_labels.gz")
-                case = basename(xpath)
-                X_test = pd.read_pickle(xpath)
-                Y_test = pd.read_pickle(ypath)
 
-                if fit_each:
-                    X_test_transform = pipe.fit_transform(X_test)
-                else:
-                    X_test_transform = pipe.transform(X_test)
+    # Change rocket threads use to 1 because we multithread the whole process
+    pipe.named_steps.rocket.n_jobs = 1
+    
+    for file in listdir(join(ifolder, "test")):
+        if file.endswith(".gz"):
+            xpaths.append(join(ifolder, "test", file))
+            ypaths.append(join(ifolder, "labels", file[:-3] + "_labels.gz"))
+            n += 1
+            if n == n_files:
+                break
 
-                Y_test_l.append(Y_test)
-                Y_scores_l.append(classifier.decision_function(X_test_transform))
-                n += 1
-                bar.next()
-                if n == n_files:
-                    break
-    bar.finish()
+    with ChargingBar("Testing", suffix="%(percent).1f%% - ETA %(eta)ds", max=n_files) as bar:
+        with ThreadPoolExecutor(max_workers=env.CORES + 1) as executor:
+            futures = executor.map(test_model, xpaths, ypaths, [fit_each] * len(xpaths), [bar] * len(xpaths))
 
+    Y_test_l, Y_scores_l = zip(*futures)
     Y_test = pd.concat(Y_test_l).reset_index(drop=True)
     Y_scores = np.concatenate(Y_scores_l)
 
@@ -171,7 +178,7 @@ def test_model(
 
 
 n_test = int(input("Number of test files: "))
-Y_test, Y_scores = test_model(join(env.DATA_FOLDER, "ready"), n_files=n_test)
+Y_test, Y_scores = test_model_multi(join(env.DATA_FOLDER, "ready"), n_files=n_test)
 
 
 verbose("Computing model performances...")
