@@ -77,7 +77,7 @@ def train_sgd(
     for epoch in range(epochs):
         n = 0
         for file in ChargingBar(
-            f"Fitting epoch {epoch+1}/{epochs}", suffix="%(percent).1f%% - %(eta)ds"
+            f"Fitting epoch {epoch+1}/{epochs}", suffix="%(percent).1f%% - ETA %(eta)ds"
         ).iter(files):
             if file.endswith(".gz"):
                 n += 1
@@ -100,6 +100,7 @@ def train_sgd(
                     break
     return pipe, classifier
 
+
 # %% TRAIN
 
 model = input("Model name: ")
@@ -107,7 +108,7 @@ model = input("Model name: ")
 if not exists(f"models/model_{model}/"):
     verbose("No model found, creating one now...")
 
-    pipe, classifier = train_sgd(join(env.DATA_FOLDER, "ready"), fit_each=False, epochs=1)
+    pipe, classifier = train_sgd(join(env.DATA_FOLDER, "ready"), epochs=3)
 
     mlflow_sktime.save_model(pipe, f"models/model_{model}/pipeline/")
     mlflow_sktime.save_model(classifier, f"models/model_{model}/classifier/")
@@ -121,6 +122,7 @@ else:
 
 # %% TEST
 
+
 def test_model(
     ifolder: str, n_files: int = 5, fit_each: bool = True
 ) -> tuple[pd.DataFrame, np.ndarray]:
@@ -131,6 +133,8 @@ def test_model(
 
     Args:
         ifolder (str): Path to the test data
+        n_files (int, optional): Number of test files. Defaults to 5.
+        fit_each (bool, optional): Whether to fit the pipeline on each file. Defaults to True.
 
     Returns:
         tuple[pd.DataFrame, np.ndarray]: Labels and predictions
@@ -138,27 +142,27 @@ def test_model(
     Y_test_l = []
     Y_scores_l = []
     n = 0
-    for file in listdir(join(ifolder, "test")):
-        if file.endswith(".gz"):
-            xpath = join(ifolder, "test", file)
-            ypath = join(ifolder, "labels", file[:-3] + "_labels.gz")
-            case = basename(xpath)
-            verbose("Loading test data...")
-            X_test = pd.read_pickle(xpath)
-            Y_test = pd.read_pickle(ypath)
+    with ChargingBar("Testing", max=n_files, suffix="%(percent).1f%% - ETA %(eta)ds") as bar:
+        for file in listdir(join(ifolder, "test")):
+            if file.endswith(".gz"):
+                xpath = join(ifolder, "test", file)
+                ypath = join(ifolder, "labels", file[:-3] + "_labels.gz")
+                case = basename(xpath)
+                X_test = pd.read_pickle(xpath)
+                Y_test = pd.read_pickle(ypath)
 
-            verbose(f"Transforming {case} with pipeline")
-            if fit_each:
-                X_test_transform = pipe.fit_transform(X_test)
-            else:
-                X_test_transform = pipe.transform(X_test)
+                if fit_each:
+                    X_test_transform = pipe.fit_transform(X_test)
+                else:
+                    X_test_transform = pipe.transform(X_test)
 
-            verbose(f"Classifying {case}...")
-            Y_test_l.append(Y_test)
-            Y_scores_l.append(classifier.decision_function(X_test_transform))
-            n += 1
-            if n == n_files:
-                break
+                Y_test_l.append(Y_test)
+                Y_scores_l.append(classifier.decision_function(X_test_transform))
+                n += 1
+                bar.next()
+                if n == n_files:
+                    break
+    bar.finish()
 
     Y_test = pd.concat(Y_test_l).reset_index(drop=True)
     Y_scores = np.concatenate(Y_scores_l)
@@ -167,9 +171,7 @@ def test_model(
 
 
 n_test = int(input("Number of test files: "))
-Y_test, Y_scores = test_model(
-    join(env.DATA_FOLDER, "ready"), n_files=n_test, fit_each=False
-)
+Y_test, Y_scores = test_model(join(env.DATA_FOLDER, "ready"), n_files=n_test)
 
 
 verbose("Computing model performances...")
