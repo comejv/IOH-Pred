@@ -1,0 +1,22 @@
+t-10 MINUTES PREDICTION
+model   |   n train |   n test  |   epochs  |   init_case   |   fit_each_case   |   AUC     |   F1
+--------+-----------+-----------+-----------+---------------+-------------------+-----------+-----------
+SGD 1   |   32      |   20      |   1       |   111         |   False           |   0.86    |   0.32
+SGD 2   |   32      |   20      |   4       |   111         |   False           |   0.92    |   0.42
+SGD 2   |   32      |   30      |   4       |   111         |   False           |   0.96    |   0.50    <- Best results
+SGD 3   |   32      |   20      |   4       |   181         |   False           |   0.85    |   0.32
+SGD 4   |   32      |   20      |   4       |   181         |   True            |   0.87    |   0.27
+SGD 5   |   32      |   20      |   4       |   111         |   True            |   0.94    |   0.39
+SGD 5   |   32      |   30      |   4       |   111         |   True            |   0.95    |   0.47
+SGD 6   |   32      |   20      |   3       |   111         |   False           |   0.91    |   0.34
+
+SGD 1
+    |--> + 3 epochs         --> SGD 2 
+    |                               |--> fit each   --> SGD 5
+    |                               |--> - 2 epochs --> SGD 6
+    |
+    |--> change init_case   --> SGD 3 --> fit each --> SGD 4
+
+
+HATIB
+AUC : 0.95
