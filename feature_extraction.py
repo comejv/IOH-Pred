@@ -80,15 +80,13 @@ def plot_comparison(df: pd.DataFrame) -> None:
     verbose("Done.")
 
 
-def transpose(ifile: str, ofile: str, tf: int) -> pd.DataFrame | None:
+def transpose(ifile: str, ofile: str, tf: int) -> None:
     """Transpose a dataframe into windows of size tf seconds
 
     Args:
-        df (pd.DataFrame): input dataframe
+        ifile (str): input file
+        ofile (str): output file
         tf (int): timeframe in seconds
-
-    Returns:
-        pd.DataFrame: transposed dataframe
     """
     df = pd.read_pickle(ifile)
     df["timestamp"] = pd.to_datetime(df.index * 10, unit="ms")
@@ -198,6 +196,8 @@ if __name__ == "__main__":
         argv.append("-" + input("T, L or P? "))
     if "-T" in argv:
         n_files = input("How many files? 0 for all: ")
+        if n_files:
+            n_files = int(n_files)
         multithreaded_transpose(
             ifolder=join(env.DATA_FOLDER, "preprocessed", "all"),
             ofolder=join(env.DATA_FOLDER, "ready", "cases"),
