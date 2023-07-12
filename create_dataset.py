@@ -1,10 +1,12 @@
-from os import listdir, makedirs, remove, rename
-from os.path import exists, join, basename
-from sys import argv
 from concurrent.futures import ThreadPoolExecutor
+from threading import Event
+from os import listdir, makedirs, remove, rename
+from os.path import basename, exists, join
+from sys import argv
 
 import pandas as pd
 import vitaldb as vdb
+from progress.bar import ChargingBar
 
 from utils import *
 
@@ -13,7 +15,8 @@ def find_cases(track_names: list[str], ops: list[str] = None) -> list[int]:
     if not exists("cases_preop.csv"):
         df_cases = pd.read_csv("https://api.vitaldb.net/cases")
         df_cases.to_csv("cases_preop.csv", index=True)
-
+    else:
+        df_cases = pd.read_csv("cases_preop.csv")
     # Cases selection
     final_set = set(vdb.find_cases(track_names))
 
@@ -36,37 +39,37 @@ def find_cases(track_names: list[str], ops: list[str] = None) -> list[int]:
 def download_case(
     case_id: int,
     track_names: list[str],
-    interval: float = None,
-    index: tuple[int, int] = None,
+    bar: ChargingBar = None,
+    event: Event = None,
 ) -> None:
     """Download a single case from the database
 
     Args:
         case_id (int): case id
         track_names (list[str]): list of track names
-        index (int, optional): Counter of the current case being downloaded. Defaults to None.
+        bar (ChargingBar): progress bar
+
     """
+    if event and event.is_set():
+        return
+
     if exists(join(env.DATA_FOLDER, f"vital/{case_id}.vital")):
-        verbose(f"Case {case_id} already exists")
+        bar.next()
         return
-    try:
-        case = vdb.VitalFile(case_id, track_names, interval)
-        # Rename tracks
-        # case.rename_tracks(mapping)
-        case.to_vital(opath=join(env.DATA_FOLDER, f"vital/{case_id}.vital"))
-        if index:
-            verbose(f"Downloaded case {case_id} : {index[0]+1}/{index[1]}")
-        else:
-            verbose(f"Downloaded case {case_id}")
-    except KeyboardInterrupt:
-        print("Download interrupted")
+
+    case = vdb.VitalFile(case_id, track_names)
+
+    if event and event.is_set():
         return
+
+    case.to_vital(opath=join(env.DATA_FOLDER, f"vital/{case_id}.vital"))
+    if bar:
+        bar.next()
 
 
 def download_cases(
     track_names: list[str],
     case_ids: list[int],
-    interval: float = None,
     max_cases: int = None,
 ) -> None:
     """Download a list of cases from the VitalDB database ; multithreaded.
@@ -76,35 +79,28 @@ def download_cases(
         case_ids (list): list of case ids
     """
     makedirs(join(env.DATA_FOLDER, "vital"), exist_ok=True)
-    if max_cases:
+    if max_cases > 0:
         case_ids = case_ids[: min(len(case_ids), max_cases)]
-    with ThreadPoolExecutor(max_workers=env.CORES + 3) as executor:
-        for i, case_id in enumerate(case_ids):
-            executor.submit(
-                download_case, case_id, track_names, interval, (i, len(case_ids))
-            )
 
-
-def vital_to_csv(ipath: str, opath: str, interval: float = None) -> None:
-    """Convert vital file to csv
-    NB : csv files are ~25 times bigger than vital files
-
-    Args:
-        ipath (str): path to the vital file to convert
-        opath (str): path where to save the csv
-        interval (float): interval resolution in seconds. Defaults to None (max res)
-    """
-    try:
-        vital = vdb.VitalFile(ipath)
-        track_names = vital.get_track_names()
-        with open(opath, "w") as tmp:
-            df = vital.to_pandas(track_names, interval)
-            df.to_csv(tmp, index=False)
-        verbose(ipath, "converted to csv")
-    except Exception as e:
-        print(f"Could not convert {ipath} to csv : {e}")
-        if exists(opath):
-            remove(opath)
+    with ChargingBar(
+        "Downloading cases",
+        max=len(case_ids),
+        suffix="%(index)d/%(max)d - ETA %(eta)ds",
+        color="blue",
+    ) as bar:
+        event = Event()
+        try:
+            with ThreadPoolExecutor(max_workers=env.CORES + 3) as executor:
+                executor.map(
+                    download_case,
+                    case_ids,
+                    [track_names] * len(case_ids),
+                    [bar] * len(case_ids),
+                    [event] * len(case_ids),
+                )
+        except KeyboardInterrupt:
+            pwarn("\nInterrupted by user, aborting running download threads, please wait...", end='')
+            event.set()
 
 
 def folder_vital_to_csv(ifolder: str, ofolder: str, interval: float = None) -> None:
@@ -257,7 +253,9 @@ def preprocessing(ifile: str, ofile: str) -> bool:
     return True
 
 
-def folder_preprocessing(ifolder: str, ofolder: str, force: bool = False) -> None:
+def folder_preprocessing(
+    ifolder: str, ofolder: str, force: bool = False, N: int = -1
+) -> None:
     """Quality control and preprocessing of all vital files in a folder ; multithreaded
 
     Args:
@@ -271,6 +269,7 @@ def folder_preprocessing(ifolder: str, ofolder: str, force: bool = False) -> Non
     ipaths = []
     opaths = []
 
+    n = 0
     for file in listdir(ifolder):
         if not file.endswith("vital"):
             continue
@@ -283,6 +282,9 @@ def folder_preprocessing(ifolder: str, ofolder: str, force: bool = False) -> Non
             continue
         ipaths.append(ipath)
         opaths.append(opath)
+        n += 1
+        if n == N:
+            break
 
     assert len(ipaths) == len(opaths), "Number of files does not match"
 
