@@ -1,11 +1,12 @@
-import matplotlib.pyplot as plt
-from scipy import signal
-import pandas as pd
 from concurrent.futures import ThreadPoolExecutor
+from os import listdir, makedirs
 from os.path import join
-from os import makedirs, listdir
 from sys import argv
 
+import matplotlib.pyplot as plt
+import pandas as pd
+from progress.bar import ChargingBar
+from scipy import signal
 
 from utils import *
 
@@ -47,7 +48,7 @@ def beat_segmentation(art_wf: pd.DataFrame) -> pd.DataFrame:
             bpm,
         ]
 
-    verbose("Beat segmentation complete")
+    print("Beat segmentation complete")
 
     return features
 
@@ -75,12 +76,12 @@ def plot_comparison(df: pd.DataFrame) -> None:
             "HR (Solar8000)",
         ]
     )
-    verbose("Plotting case...")
+    print("Plotting case...")
     plt.show()
-    verbose("Done.")
+    print("Done.")
 
 
-def transpose(ifile: str, ofile: str, tf: int) -> None:
+def transpose(ifile: str, ofile: str, tf: int, bar: ChargingBar = None) -> None:
     """Transpose a dataframe into windows of size tf seconds
 
     Args:
@@ -103,8 +104,8 @@ def transpose(ifile: str, ofile: str, tf: int) -> None:
     # Keep only windows with all data points
     final_df = reshaped_df.groupby("window").filter(lambda group: len(group) == 2000)
 
-    verbose("Transposed dataframe", ofile)
     final_df.to_pickle(ofile)
+    bar.next()
 
 
 def multithreaded_transpose(
@@ -123,11 +124,19 @@ def multithreaded_transpose(
             if n == n_files:
                 break
 
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        executor.map(transpose, ifiles, ofiles, [tf] * len(ifiles))
+    with ChargingBar(
+        "Transposing\t",
+        max=len(ifiles),
+        suffix="%(index)d/%(max)d - ETA %(eta)ds",
+        color=133,
+    ) as bar:
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            executor.map(
+                transpose, ifiles, ofiles, [tf] * len(ifiles), [bar] * len(ifiles)
+            )
 
 
-def label_events(input: str, output: str) -> None:
+def label_events(input: str, output: str, bar: ChargingBar = None) -> None:
     df_data = pd.read_pickle(input)
 
     # # Drop windows where values are missing (done in transpose function)
@@ -151,8 +160,8 @@ def label_events(input: str, output: str) -> None:
     )
     df_labels = df_labels.set_index("window")["Solar8000/ART_MBP"]
 
-    verbose("Labelled event", input)
     df_labels.to_pickle(output)
+    bar.next()
 
 
 def multithreaded_label_events(ifolder: str, ofolder: str) -> None:
@@ -164,8 +173,14 @@ def multithreaded_label_events(ifolder: str, ofolder: str) -> None:
             ifiles.append(join(ifolder, file))
             ofiles.append(join(ofolder, file[:-3] + "_labels.gz"))
 
-    with ThreadPoolExecutor(max_workers=env.CORES + 1) as executor:
-        executor.map(label_events, ifiles, ofiles)
+    with ChargingBar(
+        "Labelling\t",
+        max=len(ifiles),
+        suffix="%(index)d/%(max)d - ETA %(eta)ds",
+        color=133,
+    ) as bar:
+        with ThreadPoolExecutor(max_workers=env.CORES + 1) as executor:
+            executor.map(label_events, ifiles, ofiles, [bar] * len(ifiles))
 
 
 def plot_labels(case: str):
@@ -202,7 +217,7 @@ if __name__ == "__main__":
             ifolder=join(env.DATA_FOLDER, "preprocessed", "all"),
             ofolder=join(env.DATA_FOLDER, "ready", "cases"),
             tf=env.WINDOW_SIZE,
-            n_files=n_files
+            n_files=n_files,
         )
     if "-L" in argv:
         multithreaded_label_events(

@@ -1,10 +1,11 @@
 # %% IMPORT
 from utils import *
 
-verbose("Importing required modules...")
+print("Importing required modules...")
 from concurrent.futures import ThreadPoolExecutor
 from os import listdir, makedirs
 from os.path import basename, exists, join
+from types import SimpleNamespace
 
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
@@ -12,16 +13,16 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from matplotlib.gridspec import GridSpec
+from progress.bar import ChargingBar
+from progress.spinner import Spinner
 from sklearn.linear_model import SGDClassifier  # RidgeClassifierCV
-from sklearn.preprocessing import StandardScaler
-from sklearn.pipeline import Pipeline
 from sklearn.metrics import auc, confusion_matrix, f1_score, roc_curve
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 from sklearn.utils.class_weight import compute_class_weight
 from sktime.datatypes import check_raise
 from sktime.transformations.panel.rocket import MiniRocketMultivariate
 from sktime.utils import mlflow_sktime
-from progress.bar import ChargingBar
-from progress.spinner import Spinner
 
 
 def train_sgd(
@@ -30,13 +31,13 @@ def train_sgd(
     n_training_cases=-1,
     init_case=111,
     rocket_threads=-1,
-    fit_each=True,
+    fit_each=False,
     expected_type="pd-multiindex",
 ) -> (Pipeline, SGDClassifier):
     """Train the SGD classifier on the given training data after minirocket transformations.
 
     Args:
-        ifolder (_type_): Path to a folder containing `train` and `labels` subfolder.
+        ifolder (_type_): Path to a folder containing `cases` and `labels` subfolder.
         epochs (int, optional): Number of epochs to train for. Defaults to 4.
         n_training_cases (int, optional): Number of training cases to use. Defaults to -1 for all cases.
         init_case (int, optional): Initial case to fit rocket on. Defaults to 111.
@@ -46,9 +47,9 @@ def train_sgd(
     Returns:
         (Pipeline, SGDClassifier): Pipeline with minirocket and scaler, and trained classifier.
     """
-    verbose("Loading training data")
+    print("Loading training data")
     # LOAD TRAIN DATA
-    X_train = pd.read_pickle(join(ifolder, "train", f"{init_case}.gz"))
+    X_train = pd.read_pickle(join(ifolder, "cases", f"{init_case}.gz"))
     Y_train = pd.read_pickle(join(ifolder, "labels", f"{init_case}_labels.gz"))
 
     check_raise(X_train, mtype=expected_type)
@@ -61,7 +62,7 @@ def train_sgd(
     )
 
     if not fit_each:
-        verbose("Fitting pipeline")
+        print("Fitting pipeline")
         pipe.fit(X_train)
 
     # TRAIN MODEL
@@ -72,16 +73,18 @@ def train_sgd(
         class_weight={False: class_weights[0], True: class_weights[1]}
     )
 
-    files = listdir(join(ifolder, "train"))
-    verbose("Starting training...")
+    files = listdir(join(ifolder, "cases"))
+    print("Starting training...")
     for epoch in range(epochs):
         n = 0
         for file in ChargingBar(
-            f"Fitting epoch {epoch+1}/{epochs}", suffix="%(percent).1f%% - ETA %(eta)ds"
+            f"Epoch {epoch+1}/{epochs}\t",
+            suffix="%(percent).1f%% - ETA %(eta)ds",
+            color=18,
         ).iter(files):
             if file.endswith(".gz"):
                 n += 1
-                X_train = pd.read_pickle(join(ifolder, "train", file))
+                X_train = pd.read_pickle(join(ifolder, "cases", file))
                 Y_train = pd.read_pickle(
                     join(ifolder, "labels", file[:-3] + "_labels.gz")
                 )
@@ -106,22 +109,24 @@ if __name__ == "__main__":
     model = input("Model name: ")
 
     if not exists(f"models/model_{model}/"):
-        verbose("No model found, creating one now...")
+        print("No model found, creating one now...")
 
         pipe, classifier = train_sgd(join(env.DATA_FOLDER, "ready"), epochs=3)
 
         mlflow_sktime.save_model(pipe, f"models/model_{model}/pipeline/")
         mlflow_sktime.save_model(classifier, f"models/model_{model}/classifier/")
     else:
-        verbose("Loading pipeline from models folder...")
+        print("Loading pipeline from models folder...")
         pipe = mlflow_sktime.load_model(f"models/model_{model}/pipeline/")
-        verbose("Loading model from models folder...")
+        print("Loading model from models folder...")
         classifier = mlflow_sktime.load_model(f"models/model_{model}/classifier/")
-        verbose("Done.")
+        print("Done.")
 
 
 # %% TEST
-def test_model(xpath: str, ypath: str, fit_each: bool = False, bar: ChargingBar = None) -> tuple[pd.DataFrame, np.ndarray]:
+def test_model(
+    xpath: str, ypath: str, pipe: Pipeline, classifier: SGDClassifier, fit_each: bool = False, bar: ChargingBar = None
+) -> tuple[pd.DataFrame, np.ndarray]:
     case = basename(xpath)
     X_test = pd.read_pickle(xpath)
     Y_test = pd.read_pickle(ypath)
@@ -131,12 +136,14 @@ def test_model(xpath: str, ypath: str, fit_each: bool = False, bar: ChargingBar 
     else:
         X_test_transform = pipe.transform(X_test)
 
-    if bar : bar.next()
+    if bar:
+        bar.next()
 
     return Y_test, classifier.decision_function(X_test_transform)
 
+
 def test_model_multi(
-    ifolder: str, n_files: int = 5, fit_each: bool = False
+    ifolder: str, pipe: Pipeline, classifier: SGDClassifier, n_files: int = 5, fit_each: bool = False
 ) -> tuple[pd.DataFrame, np.ndarray]:
     """Run the model on the test data and return the predictions.
     ifolder is path to a folder where there are two subfolders :
@@ -157,18 +164,28 @@ def test_model_multi(
 
     # Change rocket threads use to 1 because we multithread the whole process
     pipe.named_steps.rocket.n_jobs = 1
-    
-    for file in listdir(join(ifolder, "test")):
+
+    for file in listdir(join(ifolder, "cases")):
         if file.endswith(".gz"):
-            xpaths.append(join(ifolder, "test", file))
+            xpaths.append(join(ifolder, "cases", file))
             ypaths.append(join(ifolder, "labels", file[:-3] + "_labels.gz"))
             n += 1
             if n == n_files:
                 break
 
-    with ChargingBar("Testing", suffix="%(percent).1f%% - ETA %(eta)ds", max=n_files) as bar:
+    with ChargingBar(
+        "Testing\t", suffix="%(percent).1f%% - ETA %(eta)ds", max=n_files, color="green"
+    ) as bar:
         with ThreadPoolExecutor(max_workers=env.CORES + 1) as executor:
-            futures = executor.map(test_model, xpaths, ypaths, [fit_each] * len(xpaths), [bar] * len(xpaths))
+            futures = executor.map(
+                test_model,
+                xpaths,
+                ypaths,
+                [pipe] * len(xpaths),
+                [classifier] * len(xpaths),
+                [fit_each] * len(xpaths),
+                [bar] * len(xpaths),
+            )
 
     Y_test_l, Y_scores_l = zip(*futures)
     Y_test = pd.concat(Y_test_l).reset_index(drop=True)
@@ -177,21 +194,24 @@ def test_model_multi(
     return Y_test, Y_scores
 
 
-if __name__ == "__main__":
-    n_test = int(input("Number of test files: "))
-    Y_test, Y_scores = test_model_multi(join(env.DATA_FOLDER, "ready"), n_files=n_test)
-
-
-    verbose("Computing model performances...")
+def model_stats(Y_test, Y_scores):
+    stats = SimpleNamespace()
     # ROC Curve
     fpr, tpr, auc_thresholds = roc_curve(Y_test, Y_scores)
     roc_auc = auc(fpr, tpr)
+    stats.fpr = fpr
+    stats.tpr = tpr
+    stats.auc_thresholds = auc_thresholds
+    stats.roc_auc = roc_auc
 
     # gmean
     gmean = np.sqrt(tpr * (1 - fpr))
     index = np.argmax(gmean)
     gmean_threshold = auc_thresholds[index]
     Y_pred_gmean = Y_scores > gmean_threshold
+    stats.gmean = gmean
+    stats.gmean_threshold = gmean_threshold
+
     # f1 score
     # f1_thresholds = np.arange(auc_thresholds[-1], auc_thresholds[0], 0.01)
     f1_thresholds = auc_thresholds
@@ -201,6 +221,8 @@ if __name__ == "__main__":
         f1 = f1_score(Y_test, y_pred)
         f1_scores.append(f1)
     f1_threshold = f1_thresholds[f1_scores.index(max(f1_scores))]
+    stats.f1_scores = f1_scores
+    stats.f1_threshold = f1_threshold
 
     # Confusion matrix
     cm = confusion_matrix(Y_test, Y_pred_gmean)
@@ -218,12 +240,24 @@ if __name__ == "__main__":
             mode="constant",
             constant_values=0,
         )
+    stats.cm = cm
+    stats.cm_norm = cm_norm
+    return stats
+
+
+if __name__ == "__main__":
+    n_test = int(input("Number of test files: "))
+    Y_test, Y_scores = test_model_multi(join(env.DATA_FOLDER, "ready"), pipe, n_files=n_test)
+
+    print("Computing model performances...")
+
+    stats = model_stats(Y_test, Y_scores)
 
     # %% PLOT
-    verbose("Plotting test results.")
+    print("Plotting test results.")
     # Create dataframe for the confusion matrices
-    df_cm = pd.DataFrame(cm, index=[False, True], columns=[False, True])
-    df_cm_norm = pd.DataFrame(cm_norm, index=[False, True], columns=[False, True])
+    df_cm = pd.DataFrame(stats.cm, index=[False, True], columns=[False, True])
+    df_cm_norm = pd.DataFrame(stats.cm_norm, index=[False, True], columns=[False, True])
 
     # Create subplots
     fig = plt.figure(layout="constrained", figsize=(15, 15))
@@ -247,7 +281,7 @@ if __name__ == "__main__":
     ax1r.set_ylabel("True label")
 
     # Plot ROC and best threshold point
-    ax2l.plot(fpr, tpr, color="blue", label="ROC curve (AUC = %0.2f)" % roc_auc)
+    ax2l.plot(stats.fpr, stats.tpr, color="blue", label="ROC curve (AUC = %0.2f)" % stats.roc_auc)
     ax2l.plot([0, 1], [0, 1], color="navy", linestyle="--")
 
     ax2l.set_xlabel("1 - Specificity")
@@ -256,25 +290,25 @@ if __name__ == "__main__":
     ax2l.legend(loc="lower right")
 
     # f1 score and gmean by threshold
-    ax2r.plot(f1_thresholds, f1_scores, label="F1 score", color="green")
+    ax2r.plot(stats.f1_thresholds, stats.f1_scores, label="F1 score", color="green")
     ax2r.axvline(
-        x=f1_threshold,
+        x=stats.f1_threshold,
         color="lightgreen",
-        label="Best f1 threshold %.2f : %.2f" % (f1_threshold, max(f1_scores)),
+        label="Best f1 threshold %.2f : %.2f" % (stats.f1_threshold, max(stats.f1_scores)),
     )
-    ax2r.plot(auc_thresholds, gmean, label="Gmean", color="blue")
+    ax2r.plot(stats.auc_thresholds, stats.gmean, label="Gmean", color="blue")
     ax2r.axvline(
-        x=gmean_threshold,
+        x=stats.gmean_threshold,
         color="lightblue",
-        label="Best gmean threshold %.2f : %.2f" % (gmean_threshold, max(gmean)),
+        label="Best gmean threshold %.2f : %.2f" % (stats.gmean_threshold, max(stats.gmean)),
     )
     ax2r.legend()
     ax2r.set_xlabel("Threshold")
     ax2r.set_ylabel("F1 score and gmean")
     ax2r.set_xlim(
         [
-            -1.5 * abs(min(f1_threshold, gmean_threshold)),
-            1.5 * abs(max(f1_threshold, gmean_threshold)),
+            -1.5 * abs(min(stats.f1_threshold, stats.gmean_threshold)),
+            1.5 * abs(max(stats.f1_threshold, stats.gmean_threshold)),
         ]
     )
     ax2r.set_title("F1 score and gmean by threshold")

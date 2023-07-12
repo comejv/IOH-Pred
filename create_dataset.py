@@ -1,5 +1,4 @@
 from concurrent.futures import ThreadPoolExecutor
-from threading import Event
 from os import listdir, makedirs, remove, rename
 from os.path import basename, exists, join
 from sys import argv
@@ -40,7 +39,6 @@ def download_case(
     case_id: int,
     track_names: list[str],
     bar: ChargingBar = None,
-    event: Event = None,
 ) -> None:
     """Download a single case from the database
 
@@ -50,17 +48,11 @@ def download_case(
         bar (ChargingBar): progress bar
 
     """
-    if event and event.is_set():
-        return
-
     if exists(join(env.DATA_FOLDER, f"vital/{case_id}.vital")):
         bar.next()
         return
 
     case = vdb.VitalFile(case_id, track_names)
-
-    if event and event.is_set():
-        return
 
     case.to_vital(opath=join(env.DATA_FOLDER, f"vital/{case_id}.vital"))
     if bar:
@@ -83,24 +75,18 @@ def download_cases(
         case_ids = case_ids[: min(len(case_ids), max_cases)]
 
     with ChargingBar(
-        "Downloading cases",
+        "Downloading\t",
         max=len(case_ids),
         suffix="%(index)d/%(max)d - ETA %(eta)ds",
-        color="blue",
+        color=162,
     ) as bar:
-        event = Event()
-        try:
-            with ThreadPoolExecutor(max_workers=env.CORES + 3) as executor:
-                executor.map(
-                    download_case,
-                    case_ids,
-                    [track_names] * len(case_ids),
-                    [bar] * len(case_ids),
-                    [event] * len(case_ids),
-                )
-        except KeyboardInterrupt:
-            pwarn("\nInterrupted by user, aborting running download threads, please wait...", end='')
-            event.set()
+        with ThreadPoolExecutor(max_workers=env.CORES) as executor:
+            executor.map(
+                download_case,
+                case_ids,
+                [track_names] * len(case_ids),
+                [bar] * len(case_ids),
+            )
 
 
 def folder_vital_to_csv(ifolder: str, ofolder: str, interval: float = None) -> None:
@@ -128,7 +114,7 @@ def folder_vital_to_csv(ifolder: str, ofolder: str, interval: float = None) -> N
         opath += ".csv"
 
         if exists(opath):
-            verbose("File", opath, "already converted, skipping")
+            print("File", opath, "already converted, skipping")
             continue
 
         ipaths.append(ipath)
@@ -140,11 +126,11 @@ def folder_vital_to_csv(ifolder: str, ofolder: str, interval: float = None) -> N
 
 def check_and_move(condition: bool, error_msg: str, src: str, dst: str) -> bool:
     if condition:
-        verbose(error_msg)
+        print(error_msg)
         if not exists(dst):
             rename(src=src, dst=dst)
         else:
-            verbose(
+            print(
                 f"Warning : file {dst} already exists, not removed from input folder"
             )
         return False
@@ -168,7 +154,7 @@ def test_hypothension(case_name: str, case: pd.DataFrame, ofolder: str) -> bool:
         return False
 
 
-def preprocessing(ifile: str, ofile: str) -> bool:
+def preprocessing(ifile: str, ofile: str, bar: ChargingBar = None) -> bool:
     """Preprocessing and pickling of a vital file
 
     Args:
@@ -197,7 +183,7 @@ def preprocessing(ifile: str, ofile: str) -> bool:
         < 0.7 * 1 / (1.7 * env.SAMPLING_RATE)
     ):
         rename(ifile, join(join(env.DATA_FOLDER, "unfit/"), basename(ifile)))
-        verbose("File", ifile, "unfit")
+        bar.next()
         return False
     start_of_ag = rolling_sum[rolling_sum >= 0.9 * timeframe].idxmin()
 
@@ -248,7 +234,7 @@ def preprocessing(ifile: str, ofile: str) -> bool:
         compression=compression_set,
     )
 
-    verbose("File", basename(ifile), "preprocessed to", ofile)
+    bar.next()
 
     return True
 
@@ -278,7 +264,6 @@ def folder_preprocessing(
         opath = join(ofolder, case_id + ".gz")
 
         if exists(opath) and not force:
-            verbose("Case", case_id, "already preprocessed, skipping")
             continue
         ipaths.append(ipath)
         opaths.append(opath)
@@ -288,10 +273,18 @@ def folder_preprocessing(
 
     assert len(ipaths) == len(opaths), "Number of files does not match"
 
-    with ThreadPoolExecutor(max_workers=env.CORES - 1) as executor:
-        futures = list(executor.map(preprocessing, ipaths, opaths))
+    with ChargingBar(
+        "Preprocessing\t",
+        max=len(ipaths),
+        suffix="%(index)d/%(max)d - ETA %(eta)ds",
+        color=162,
+    ) as bar:
+        with ThreadPoolExecutor(max_workers=env.CORES - 1) as executor:
+            futures = list(
+                executor.map(preprocessing, ipaths, opaths, [bar] * len(ipaths))
+            )
 
-    verbose(f"Valid cases : {sum(futures)}/{len(ipaths)}")
+    print(f"Valid cases : {sum(futures)}/{len(ipaths)}")
 
 
 if __name__ == "__main__":

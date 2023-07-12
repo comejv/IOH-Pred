@@ -96,7 +96,7 @@ def group_beat_unstack(filename, output):
 
     compression_set = {"method": "gzip", "compresslevel": 1, "mtime": 1}
 
-    verbose("Beat segmentation complete")
+    print("Beat segmentation complete")
     out.to_pickle(output, compression=compression_set)
 
 

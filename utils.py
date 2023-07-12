@@ -1,5 +1,6 @@
 import json
 from os import cpu_count
+from types import SimpleNamespace
 
 # Basic python module providing functions to output
 # formatted text using ANSI escape sequences.
@@ -100,12 +101,6 @@ def print_table(data: list[str], headers: list[str]) -> None:
         print()
 
 
-def verbose(*args, **kwargs):
-    """Calls print in verbose mode (defined by env.VERBOSE)"""
-    if env.VERBOSE:
-        print(*args, **kwargs)
-
-
 def init_venv_pip():
     import subprocess
     from os.path import exists
@@ -150,7 +145,7 @@ def init_venv_pip():
             exit(0)
 
 
-def env(env_file: str = "env.json"):
+def get_env(env_file: str = "env.json"):
     """Load environment variables into the function's __dict__. They can be accessed as attributes.
 
     Args:
@@ -160,12 +155,14 @@ def env(env_file: str = "env.json"):
     env_json = json.load(env_file)
     env_file.close()
 
-    env.__dict__ |= env_json
+    env = SimpleNamespace(**env_json)
 
     env.CORES = cpu_count() if cpu_count() > 1 else 4
 
+    return env
 
-env()
+
+env = get_env()
 
 
 if __name__ == "__main__":
@@ -180,3 +177,4 @@ if __name__ == "__main__":
         data=[["Hello", "World"], ["This", "Is", "A", "Table"]],
         headers=["A", "B", "C", "D"],
     )
+    print(env)
