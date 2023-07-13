@@ -73,7 +73,7 @@ def train_sgd(
         class_weight={False: class_weights[0], True: class_weights[1]}
     )
 
-    files = listdir(join(ifolder, "cases"))
+    files = sorted(listdir(join(ifolder, "cases"))[:n_training_cases])
     print("Starting training...")
     for epoch in range(epochs):
         n = 0
@@ -91,10 +91,13 @@ def train_sgd(
 
                 check_raise(X_train, mtype=expected_type)
 
-                if fit_each:
-                    X_train_transform = pipe.fit_transform(X_train)
-                else:
-                    X_train_transform = pipe.transform(X_train)
+                try:
+                    if fit_each:
+                        X_train_transform = pipe.fit_transform(X_train)
+                    else:
+                        X_train_transform = pipe.transform(X_train)
+                except Exception as e:
+                    perror(f"Couldn't ")
 
                 classifier.partial_fit(
                     X_train_transform, Y_train, classes=[False, True]
@@ -165,7 +168,7 @@ def test_model_multi(
     # Change rocket threads use to 1 because we multithread the whole process
     pipe.named_steps.rocket.n_jobs = 1
 
-    for file in listdir(join(ifolder, "cases")):
+    for file in sorted(listdir(join(ifolder, "cases"))):
         if file.endswith(".gz"):
             xpaths.append(join(ifolder, "cases", file))
             ypaths.append(join(ifolder, "labels", file[:-3] + "_labels.gz"))
