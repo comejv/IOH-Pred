@@ -77,8 +77,10 @@ def binput(prompt: str) -> bool:
                 exit(0)
 
 
-def print_table(data: list[str], headers: list[str]) -> None:
-    """Shows a formatted table in the terminal."""
+def print_table(data: list[list], headers: list[str]) -> None:
+    """Shows a formatted table in the terminal. Data is a list of rows.
+    Each row is a list of printable objects.
+    """
     max_length_column = [0] * len(headers)
     for i in range(len(data)):
         for j in range(len(data[i])):
@@ -104,13 +106,11 @@ def print_table(data: list[str], headers: list[str]) -> None:
 def init_venv_pip():
     import subprocess
     from os.path import exists
-    from sys import executable, prefix, base_prefix
+    from sys import base_prefix, executable, prefix
     from time import sleep
 
     if prefix != base_prefix:
-        print(
-            "Running from inside a virtual environment. Installing dependencies..."
-        )
+        print("Running from inside a virtual environment. Installing dependencies...")
         if (
             subprocess.call(
                 [executable, "-m", "pip", "install", "-r", "requirements.txt"]
