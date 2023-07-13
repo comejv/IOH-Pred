@@ -102,8 +102,6 @@ def train_sgd(
                 classifier.partial_fit(
                     X_train_transform, Y_train, classes=[False, True]
                 )
-                if n == n_training_cases:
-                    break
     return pipe, classifier
 
 
