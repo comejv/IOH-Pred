@@ -81,7 +81,7 @@ def plot_comparison(df: pd.DataFrame) -> None:
     print("Done.")
 
 
-def transpose(ifile: str, ofile: str, tf: int, bar: ChargingBar = None) -> None:
+def reshape(ifile: str, ofile: str, tf: int, bar: ChargingBar = None) -> None:
     """Transpose a dataframe into windows of size tf seconds
 
     Args:
@@ -108,7 +108,7 @@ def transpose(ifile: str, ofile: str, tf: int, bar: ChargingBar = None) -> None:
     bar.next()
 
 
-def multithreaded_transpose(
+def multithreaded_reshaping(
     ifolder: str, ofolder: str, tf: int, n_files: int = 0
 ) -> pd.DataFrame:
     makedirs(ifolder, exist_ok=True)
@@ -132,7 +132,7 @@ def multithreaded_transpose(
     ) as bar:
         with ThreadPoolExecutor(max_workers=4) as executor:
             executor.map(
-                transpose, ifiles, ofiles, [tf] * len(ifiles), [bar] * len(ifiles)
+                reshape, ifiles, ofiles, [tf] * len(ifiles), [bar] * len(ifiles)
             )
 
 
@@ -213,7 +213,7 @@ if __name__ == "__main__":
         n_files = input("How many files? 0 for all: ")
         if n_files:
             n_files = int(n_files)
-        multithreaded_transpose(
+        multithreaded_reshaping(
             ifolder=join(env.DATA_FOLDER, "preprocessed", "all"),
             ofolder=join(env.DATA_FOLDER, "ready", "cases"),
             tf=env.WINDOW_SIZE,
