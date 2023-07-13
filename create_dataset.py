@@ -154,7 +154,7 @@ def test_hypothension(case_name: str, case: pd.DataFrame, ofolder: str) -> bool:
         return False
 
 
-def preprocessing(ifile: str, ofile: str, bar: ChargingBar = None) -> bool:
+def clean_case(ifile: str, ofile: str, bar: ChargingBar = None) -> bool:
     """Preprocessing and pickling of a vital file
 
     Args:
@@ -239,10 +239,10 @@ def preprocessing(ifile: str, ofile: str, bar: ChargingBar = None) -> bool:
     return True
 
 
-def folder_preprocessing(
+def folder_cleaning(
     ifolder: str, ofolder: str, force: bool = False, N: int = -1
 ) -> None:
-    """Quality control and preprocessing of all vital files in a folder ; multithreaded
+    """Quality control and preprocessing cleaning of all vital files in a folder ; multithreaded
 
     Args:
         ifolder (str): path to the folder containing the vital files
@@ -274,14 +274,14 @@ def folder_preprocessing(
     assert len(ipaths) == len(opaths), "Number of files does not match"
 
     with ChargingBar(
-        "Preprocessing\t",
+        "Cleaning\t",
         max=len(ipaths),
         suffix="%(index)d/%(max)d - ETA %(eta)ds",
         color=162,
     ) as bar:
         with ThreadPoolExecutor(max_workers=env.CORES - 1) as executor:
             futures = list(
-                executor.map(preprocessing, ipaths, opaths, [bar] * len(ipaths))
+                executor.map(clean_case, ipaths, opaths, [bar] * len(ipaths))
             )
 
     print(f"Valid cases : {sum(futures)}/{len(ipaths)}")
@@ -299,12 +299,12 @@ if __name__ == "__main__":
             interval=env.SAMPLING_RATE,
         )
     if "-pre" in argv:
-        folder_preprocessing(
+        folder_cleaning(
             ifolder=join(env.DATA_FOLDER, "vital"),
             ofolder=join(env.DATA_FOLDER, "preprocessed", "all"),
         )
     elif "-pref" in argv:
-        folder_preprocessing(
+        folder_cleaning(
             join(env.DATA_FOLDER, "vital"),
             join(env.DATA_FOLDER, "preprocessed", "all"),
             force=True,
