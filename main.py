@@ -13,10 +13,10 @@ parser.add_argument(
     help="download [-n] cases from VitalDB that have all tracks listed in env.json.",
 )
 parser.add_argument(
-    "-p",
-    "--preprocess",
+    "-c",
+    "--clean",
     action="store_true",
-    help=f"preprocess [-n] cases from {env.DATA_FOLDER}vital and pickle them to {env.DATA_FOLDER}preprocessed/",
+    help="clean [-n] downloaded cases and pickle them to {env.DATA_FOLDER}preprocessed/",
 )
 parser.add_argument(
     "-f",
@@ -25,11 +25,17 @@ parser.add_argument(
     help="don't skip already preprocessed data, process it again",
 )
 parser.add_argument(
-    "-t",
-    "--transpose",
+    "-r",
+    "--reshape",
     action="store_true",
-    help="transpose [-n] cases from the preprocessed data into the format required by Rocket and Sklearn (windows of env.WINDOW_SIZE seconds)"
+    help="reshape [-n] cases from the preprocessed data into the format required by Rocket and Sklearn (windows of env.WINDOW_SIZE seconds)"
     "and pickle them to {env.DATA_FOLDER}ready/",
+)
+parser.add_argument(
+    "-p",
+    "--preprocess",
+    action="store_true",
+    help=f"preprocess (clean + reshape) [-n] cases from {env.DATA_FOLDER}vital and pickle them to {env.DATA_FOLDER}ready/cases/",
 )
 parser.add_argument(
     "-l",
@@ -38,7 +44,7 @@ parser.add_argument(
     help=f"create label dataframes shifted by env.PRED_WINDOW minutes to train the model and pickle them to {env.DATA_FOLDER}ready/labels/",
 )
 parser.add_argument(
-    "-s",
+    "-t",
     "--train_sgd",
     action="store_true",
     help=f"train the SGD model on [-n] cases from {env.DATA_FOLDER}ready/test",
@@ -88,15 +94,15 @@ except ImportError as e:
 if args.download:
     cases = cd.find_cases(env.TRACKS)
     cd.download_cases(env.TRACKS, cases, max_cases=args.max_number)
-if args.preprocess:
-    cd.folder_preprocessing(
+if args.clean or args.preprocess:
+    cd.folder_cleaning(
         ifolder=join(env.DATA_FOLDER, "vital"),
         ofolder=join(env.DATA_FOLDER, "preprocessed"),
         force=args.force,
         N=args.max_number,
     )
-if args.transpose:
-    fe.multithreaded_transpose(
+if args.reshape or args.preprocess:
+    fe.multithreaded_reshaping(
         ifolder=join(env.DATA_FOLDER, "preprocessed"),
         ofolder=join(env.DATA_FOLDER, "ready", "cases"),
         tf=env.WINDOW_SIZE,
@@ -130,6 +136,11 @@ if args.test_sgd:
     if not exists(f"models/model_{model}/"):
         perror("Model does not exist. Train it first with the --train_sgd flag.")
         exit(1)
+    if not exists(join(env.DATA_FOLDER, "ready", "test")):
+        makedirs(join(env.DATA_FOLDER, "ready", "test"))
+        perror("No test data found.")
+        pwarn(f"Please put preprocessed cases in {env.DATA_FOLDER}ready/test/")
+        exit(1)
 
     print("Loading pipeline from models folder...")
     pipe = mlflow_sktime.load_model(f"models/model_{model}/pipeline/")
@@ -144,6 +155,24 @@ if args.test_sgd:
     stats = skr.model_stats(Y_test, Y_scores)
 
     print_table(
-        [model, stats.roc_auc, max(stats.f1_scores), max(stats.gmean)],
-        ["model", "roc_auc", "best f1", "best gmean"],
+        [
+            [
+                model,
+                round(stats.roc_auc, 2),
+                round(stats.cm_norm[1][1], 2),
+                round(stats.cm_norm[0][0], 2),
+                round(max(stats.f1_scores), 2),
+                round(max(stats.gmean), 2),
+                round(stats.cm.sum() * 20 / 3600, 1),
+            ]
+        ],
+        [
+            "model",
+            "roc_auc",
+            "sensitivity",
+            "specificity",
+            "best f1",
+            "best gmean",
+            "test length (h)",
+        ],
     )
