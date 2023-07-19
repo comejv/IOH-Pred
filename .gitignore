@@ -16,8 +16,6 @@ env.json
 # Other papers
 extern
 
-# Tests
 test*
-
-# Latex
 latex
+data
