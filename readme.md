@@ -33,6 +33,8 @@ The python script used to process the data is in [create_dataset.py](create_data
 
 ## Usage
 
+> This repository can be run in a [Google Colab Notebook](https://colab.research.google.com/drive/192E437-BKluvVX3EUWzTfA97um57VqyE?usp=sharing)
+
 ### Downloading and preprocessing the data
 
 > Note that most functions are multithreaded.
