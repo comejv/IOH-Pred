@@ -59,6 +59,11 @@ options:
                         max number of cases to apply the chosen functions to, -1 for all cases, defaults to 10
 ```
 
+Example for a complete process, from download to train on 50 cases : 
+```bash
+python3 main.py -dcrpltn 50
+```
+
 ### Visualizing the preprocessed data
 
 You can visualize the data by running the following program :
