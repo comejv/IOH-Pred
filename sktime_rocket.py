@@ -224,6 +224,7 @@ def model_stats(Y_test, Y_scores):
     f1_threshold = f1_thresholds[f1_scores.index(max(f1_scores))]
     stats.f1_scores = f1_scores
     stats.f1_threshold = f1_threshold
+    stats.f1_thresholds = f1_thresholds
 
     # Confusion matrix
     cm = confusion_matrix(Y_test, Y_pred_gmean)
@@ -291,7 +292,7 @@ if __name__ == "__main__":
     ax2l.legend(loc="lower right")
 
     # f1 score and gmean by threshold
-    ax2r.plot(stats.f1_threshold, stats.f1_scores, label="F1 score", color="green")
+    ax2r.plot(stats.f1_thresholds, stats.f1_scores, label="F1 score", color="green")
     ax2r.axvline(
         x=stats.f1_threshold,
         color="lightgreen",
