@@ -248,7 +248,7 @@ def model_stats(Y_test, Y_scores):
 
 if __name__ == "__main__":
     n_test = int(input("Number of test files: "))
-    Y_test, Y_scores = test_model_multi(join(env.DATA_FOLDER, "ready"), pipe, n_files=n_test)
+    Y_test, Y_scores = test_model_multi(join(env.DATA_FOLDER, "ready"), pipe, classifier, n_files=n_test)
 
     print("Computing model performances...")
 
@@ -291,7 +291,7 @@ if __name__ == "__main__":
     ax2l.legend(loc="lower right")
 
     # f1 score and gmean by threshold
-    ax2r.plot(stats.f1_thresholds, stats.f1_scores, label="F1 score", color="green")
+    ax2r.plot(stats.f1_threshold, stats.f1_scores, label="F1 score", color="green")
     ax2r.axvline(
         x=stats.f1_threshold,
         color="lightgreen",
