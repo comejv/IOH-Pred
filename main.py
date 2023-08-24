@@ -114,11 +114,10 @@ if args.label:
         ifolder=join(env.DATA_FOLDER, "ready", "cases"),
         ofolder=join(env.DATA_FOLDER, "ready", "labels"),
     )
-    # TODO: move some files to test folder
-    #mkdir(join(env.DATA_FOLDER, "ready", "test"))
-    #dir = listdir(join(env.DATA_FOLDER, "ready", "cases"))
-    #for file in dir[::2]:
-    #    rename(file, env.DATA_FOLDER, "ready", "test", )
+    mkdir(join(env.DATA_FOLDER, "ready", "test"))
+    dir = listdir(join(env.DATA_FOLDER, "ready", "cases"))
+    for file in dir[:50:2]:
+        rename(join(env.DATA_FOLDER, "ready", "cases", file), join(env.DATA_FOLDER, "ready", "test", file))
 model = None
 if args.train_sgd:
     pbold("Model name ? ", end="")
