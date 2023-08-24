@@ -98,10 +98,16 @@ def train_sgd(
                         X_train_transform = pipe.transform(X_train)
                 except Exception as e:
                     perror(f"Couldn't ")
-
-                classifier.partial_fit(
-                    X_train_transform, Y_train, classes=[False, True]
-                )
+                
+                try:
+                    classifier.partial_fit(
+                        X_train_transform, Y_train, classes=[False, True]
+                    )
+                except ValueError as e:
+                    perror(e)
+                    pwarn(f"The case {file} has been moved to unfit folder.")
+                    rename(join(ifolder, "cases", file), join(env.DATA_FOLDER, "unfit", file))
+                    remove(join(ifolder, "labels", file[:-3] + "_labels.gz"))
     return pipe, classifier
 
 

@@ -1,7 +1,7 @@
 from argparse import ArgumentParser
 from sys import argv
 from os.path import join, exists
-from os import listdir, rename, mkdir
+from os import listdir, rename, mkdir, makedirs
 
 from utils import *
 
@@ -114,7 +114,7 @@ if args.label:
         ifolder=join(env.DATA_FOLDER, "ready", "cases"),
         ofolder=join(env.DATA_FOLDER, "ready", "labels"),
     )
-    mkdir(join(env.DATA_FOLDER, "ready", "test"))
+    makedirs(join(env.DATA_FOLDER, "ready", "test"), exist_ok=True)
     dir = listdir(join(env.DATA_FOLDER, "ready", "cases"))
     for file in dir[:50:2]:
         rename(join(env.DATA_FOLDER, "ready", "cases", file), join(env.DATA_FOLDER, "ready", "test", file))
