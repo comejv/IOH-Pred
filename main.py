@@ -2,7 +2,6 @@ from argparse import ArgumentParser
 from sys import argv
 from os.path import join, exists
 from os import listdir, rename, mkdir
-from sktime.utils import mlflow_sktime
 
 from utils import *
 
@@ -85,6 +84,7 @@ try:
     import feature_extraction as fe
     import plotting as pl
     import sktime_rocket as skr
+    from sktime.utils import mlflow_sktime
 except ImportError as e:
     perror("Import error(s) :", e.msg)
     solve_imports = binput("Would you like to solve the import errors? (y/n)")
