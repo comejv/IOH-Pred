@@ -108,6 +108,8 @@ def train_sgd(
                     pwarn(f"The case {file} has been moved to unfit folder.")
                     rename(join(ifolder, "cases", file), join(env.DATA_FOLDER, "unfit", file))
                     remove(join(ifolder, "labels", file[:-3] + "_labels.gz"))
+                    files.remove(file)
+
     return pipe, classifier
 
 
