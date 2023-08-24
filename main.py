@@ -1,6 +1,7 @@
 from argparse import ArgumentParser
 from sys import argv
 from os.path import join, exists
+from os import listdir, rename, mkdir
 from sktime.utils import mlflow_sktime
 
 from utils import *
@@ -113,6 +114,11 @@ if args.label:
         ifolder=join(env.DATA_FOLDER, "ready", "cases"),
         ofolder=join(env.DATA_FOLDER, "ready", "labels"),
     )
+    # TODO: move some files to test folder
+    #mkdir(join(env.DATA_FOLDER, "ready", "test"))
+    #dir = listdir(join(env.DATA_FOLDER, "ready", "cases"))
+    #for file in dir[::2]:
+    #    rename(file, env.DATA_FOLDER, "ready", "test", )
 model = None
 if args.train_sgd:
     pbold("Model name ? ", end="")
