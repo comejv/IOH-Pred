@@ -23,8 +23,8 @@ The goal of this project is to train a machine learning model to predict IOH eve
 
 - [x] Selecting, downloading and cleaning up data
 - [x] Preprocessing the data 
-- [ ] Training the model
-- [ ] Evaluating the model
+- [x] Training the model
+- [x] Evaluating the model
 
 ## Data used
 
@@ -35,19 +35,28 @@ The python script used to process the data is in [create_dataset.py](create_data
 
 ### Downloading and preprocessing the data
 
-> Note that download and preprocessing of the data are multithreaded.
+> Note that most functions are multithreaded.
 
-You should first set up the environment by removing the `.dist` extension from [env.json.dist](env.json.dist) and change its settings as you see fit.
-```bash
-python create_dataset.py -dl
 ```
-You can then preprocess the data :
-```bash
-python create_dataset.py -pre
-```
-These two options can be combined in one command :
-```bash
-python create_dataset.py -dl -pre
+usage: main.py [-h] [-d] [-c] [-f] [-r] [-p] [-l] [-t] [-e EPOCHS] [-T] [-n -1..6388]
+
+options:
+  -h, --help            show this help message and exit
+  -d, --download        download [-n] cases from VitalDB that have all tracks listed in env.json.
+  -c, --clean           clean [-n] downloaded cases and pickle them to {env.DATA_FOLDER}preprocessed/
+  -f, --force           don't skip already preprocessed data, process it again
+  -r, --reshape         reshape [-n] cases from the preprocessed data into the format required by Rocket and Sklearn
+                        (windows of env.WINDOW_SIZE seconds)and pickle them to {env.DATA_FOLDER}ready/
+  -p, --preprocess      preprocess (clean + reshape) [-n] cases from D:\come\datavital and pickle them to
+                        D:\come\dataready/cases/
+  -l, --label           create label dataframes shifted by env.PRED_WINDOW minutes to train the model and pickle them
+                        to D:\come\dataready/labels/
+  -t, --train_sgd       train the SGD model on [-n] cases from D:\come\dataready/test
+  -e EPOCHS, --epochs EPOCHS
+                        number of epochs to train the model
+  -T, --test_sgd        test the model on [-n] cases from {env.DATA_FOLDER}test/
+  -n -1..6388, --max-number -1..6388
+                        max number of cases to apply the chosen functions to, -1 for all cases, defaults to 10
 ```
 
 ### Visualizing the preprocessed data
