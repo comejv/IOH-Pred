@@ -1,2 +1,2 @@
-mlflow==2.6.0
+mlflow==2.8.1
 sktime==0.22.0
